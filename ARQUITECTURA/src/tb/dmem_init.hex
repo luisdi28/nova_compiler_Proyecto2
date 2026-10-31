@@ -1,0 +1,6 @@
+// Archivo de carga de ejemplo para tb_dmem.sv.
+// Una palabra de 32 bits por linea, 8 digitos hexadecimales.
+// Es el mismo formato que va a producir la herramienta de carga de archivos.
+A1B2C3D4
+11223344
+0000FFFF

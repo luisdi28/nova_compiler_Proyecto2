@@ -1,0 +1,37 @@
+# Lo que genera la construccion
+novac
+*.o
+*.d
+
+# Lo que generan bison y flex
+fase2_sintactico/nova.tab.c
+fase2_sintactico/nova.tab.h
+fase2_sintactico/nova.output
+fase1_lexico/lex.yy.c
+
+# Temporales de los scripts de prueba
+.tmp_*
+
+# Ejecutables de CERBERO: 'novac programa.nv' deja un binario con el nombre
+# del fuente, sin extension, asi que se ignoran por nombre.
+a.out
+factorial
+saludo
+traza
+mergesort
+multiplicacion
+bits_y_hex
+busqueda_matriz
+desplazamientos
+operadores
+matriz
+estadistica
+convolucion
+rango
+div_cero
+boveda
+cola
+W0[0-9][0-9]_*
+!W0[0-9][0-9]_*.nv
+E[0-9][0-9][0-9]_*
+!E[0-9][0-9][0-9]_*.nv
