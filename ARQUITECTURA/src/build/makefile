@@ -107,7 +107,19 @@ DEPS_credencial   := $(wildcard $(CPU)/*.sv) \
 DEPS_ejemplos     := $(wildcard $(CPU)/*.sv) \
                      $(PROGS)/fibonacci.hex \
                      $(PROGS)/estadisticas.hex \
+                     $(PROGS)/sesion_sin_logout.hex \
+                     $(PROGS)/contar_hasta_n.hex
+# tb_logout responde a una pregunta concreta -- si la boveda queda abierta
+# cuando el programa no hace LOGOUT -- y por eso tiene nombre propio en vez de
+# vivir dentro de tb_ejemplos: una propiedad de seguridad que no se puede
+# enseñar en un comando no esta demostrada para quien viene a preguntarla.
+DEPS_logout       := $(wildcard $(CPU)/*.sv) \
                      $(PROGS)/sesion_sin_logout.hex
+# tb_vliw mide el mismo calculo escrito con y sin trabajo independiente. Los
+# dos programas pasan por el empaquetador antes de ensamblarse.
+DEPS_vliw         := $(wildcard $(CPU)/*.sv) \
+                     $(PROGS)/suma_simple_emp.hex \
+                     $(PROGS)/suma_vliw_emp.hex
 # tb_sum corre el programa que produjo el compilador NOVA de CE1108, para
 # comprobar que su generador de codigo y este procesador siguen de acuerdo
 DEPS_sum          := $(wildcard $(CPU)/*.sv) \
@@ -126,6 +138,7 @@ XFLAGS_sum := -DCERBERO_IMEM_FILE='"$(PROGS)/suma_10_15.hex"' \
 # ---- Unidades sin modulo propio (testbenches de integracion) ----------------
 # Para estas, la receta no antepone $(CPU)/<unidad>.sv
 NO_RTL := crypto_vault latency wconf pipeline fetch_flow asm div archivo cifrado \
+          logout vliw \
           credencial descifrado programa ejemplos sum
 
 # Objetivos derivados. Se nombran en variables porque las reglas de abajo son
@@ -193,9 +206,19 @@ BUNDLES_cifrar_archivo    := 2048
 BUNDLES_descifrar_archivo := 2048
 # tb_ejemplos carga el .data de estadisticas.s en una dmem de 16384 palabras
 PALABRAS_estadisticas := 16384
+# Los dos programas de la demostracion VLIW llevan su vector en .data
+PALABRAS_suma_simple_emp := 16384
+PALABRAS_suma_vliw_emp   := 16384
+PALABRAS_contar_hasta_n  := 16384
 # tb_sum instancia memorias chicas: 64 bundles y 16 palabras
 BUNDLES_suma_10_15  := 64
 PALABRAS_suma_10_15 := 16
+
+# Un programa que termina en _emp lo produce el empaquetador a partir del
+# que tiene el mismo nombre sin el sufijo. Es la fase de planificacion VLIW:
+# el fuente se escribe una operacion por bundle y la herramienta las junta.
+$(PROGS)/%_emp.s: $(PROGS)/%.s $(TOOLS)/empacar.py $(CPU)/cerbero_defs.svh
+	python3 $(TOOLS)/empacar.py $< -o $@
 
 $(PROGS)/%.hex $(PROGS)/%_datos.hex: $(PROGS)/%.s $(CPU)/cerbero_defs.svh
 	$(ASM) $< -o $(PROGS)/$*.hex --datos $(PROGS)/$*_datos.hex \
@@ -442,6 +465,73 @@ endif
 	       +ESCRITURAS=$(ESCRITURAS) +ESCRITURAS_MAX=$(ESCRITURAS_MAX)
 
 # Comprueba que el programa de cobertura usa el 100% del conjunto
+# ---- Las cinco etapas del pipeline ------------------------------------------
+# "Revisar que el procesador y sus etapas funcionan correctamente" en un
+# comando. Corre los testbenches que miran la segmentacion por dentro, en vez
+# de mirar solo el resultado final de un programa:
+#
+#   reg_if_id / reg_id_ex / reg_ex_mem   cada frontera por separado, campo a
+#                                        campo, con huella de bits
+#   pipeline                             la latencia expuesta medida sobre la
+#                                        cadena real de registros mas el banco
+#   latency                              la misma medida contra el modelo, y
+#                                        comparada con los 3 bundles del ISA
+#   fetch / fetch_flow                   el contador de programa, el delay slot
+#                                        y HALT con la BRU real
+#   wconf                                los dos detectores de conflicto de
+#                                        escritura, contrastados entre si
+#   top                                  las cinco etapas juntas, siete
+#                                        programas
+.PHONY: etapas
+etapas: reg_if_id reg_id_ex reg_ex_mem pipeline latency fetch fetch_flow wconf top
+	@echo ""
+	@echo "=============================================================="
+	@echo " Las cinco etapas, cada frontera y la latencia: todo verificado"
+	@echo "=============================================================="
+
+# ---- Ocupacion de los bundles y empaquetado ---------------------------------
+# Las dos herramientas que responden a "¿esta usando el bundle de verdad?".
+#
+#   make ocupacion            el informe de todos los programas
+#   make empacar PROG=x.s     empaqueta uno y deja x_emp.s al lado
+#
+# El empaquetador NO cambia lo que el programa calcula: junta en un mismo
+# bundle las operaciones que son independientes, respetando la latencia de
+# tres, los puertos de escritura y el orden de la memoria. Lo que el programa
+# hace es cosa del programador; cuantos bundles tarda, de la herramienta.
+.PHONY: ocupacion empacar vliw-comparar
+ocupacion:
+	@echo ""
+	@echo "---- cuanto del bundle se usa, programa por programa ----"
+	@for f in $(PROGS)/*.s; do 	    case "$$f" in *_emp.s) continue;; esac; 	    python3 $(TOOLS)/empacar.py "$$f" --informe 2>/dev/null; 	done
+
+empacar:
+	@test -n "$(PROG)" || { echo "error: falta PROG=programa.s"; exit 2; }
+	python3 $(TOOLS)/empacar.py $(if $(findstring /,$(PROG)),$(PROG),$(PROGS)/$(PROG))
+
+# La comparacion de la demostracion VLIW, fuera del testbench, para enseñarla
+# con los dos programas a la vista
+vliw-comparar: $(PROGS)/suma_simple_emp.hex $(PROGS)/suma_vliw_emp.hex
+	@echo ""
+	@echo "---- el mismo calculo, escrito de dos formas ----"
+	@$(MAKE) -s correr PROG=suma_simple_emp.s  MOSTRAR=0x200 PALABRAS=1 | 	    grep -E "HALT en|0x00000200"
+	@$(MAKE) -s correr PROG=suma_vliw_emp.s    MOSTRAR=0x200 PALABRAS=1 | 	    grep -E "HALT en|0x00000200"
+
+# ---- La huella del cifrado --------------------------------------------------
+# El SHA-256 del criptograma, para comparar contra otra implementacion.
+#
+#   make huella                                  el archivo de prueba
+#   make huella ARCHIVO=../../mi_foto.png
+#   make huella ARCHIVO=x.txt LLAVE=A1B2C3D4,11223344,55667788,99AABBCC
+#
+# Corre el cifrado en el RTL, saca el criptograma de la memoria de datos y lo
+# compara con el modelo de referencia en Python. Los dos numeros tienen que
+# coincidir, y el de arriba es el que se le da a quien quiera comprobarlo con
+# su propia implementacion.
+.PHONY: huella
+huella:
+	python3 $(TOOLS)/huella.py $(ARCHIVO) $(if $(strip $(LLAVE)),--llave "$(LLAVE)",)
+
 cobertura:
 	@echo "---- cobertura del conjunto de instrucciones ----"
 	$(ASM) $(PROGS)/cobertura.s --cobertura

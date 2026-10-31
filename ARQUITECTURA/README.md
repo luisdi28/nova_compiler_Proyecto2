@@ -13,6 +13,9 @@ Escuela de Ingeniería en Computadores, Instituto Tecnológico de Costa Rica.
 | Microarquitectura | [`docs/microarchitecture.md`](docs/microarchitecture.md) |
 | Modelo de simulación | [`docs/simulation.md`](docs/simulation.md) |
 | Integración con CE1108 | [`docs/compiler-integration.md`](docs/compiler-integration.md) |
+| **Respuesta a la revisión** | [`docs/respuesta_a_la_revision.md`](docs/respuesta_a_la_revision.md) |
+| **Escribir un programa de cero** | [`docs/escribir_programas.md`](docs/escribir_programas.md) |
+| **Del fuente al binario** | [`docs/del_fuente_al_binario.md`](docs/del_fuente_al_binario.md) |
 
 ---
 
@@ -122,7 +125,12 @@ Todo se corre desde `src/build`:
 ```bash
 cd src/build
 
-make            # pruebas de las herramientas, los veintiocho testbenches y el flujo
+make            # pruebas de las herramientas, los treinta testbenches y el flujo
+make ocupacion  # cuánto del bundle usa cada programa
+make empacar PROG=x.s   # empaqueta operaciones independientes en un bundle
+make vliw       # el mismo cálculo con y sin paralelismo, y sus ciclos
+make logout     # ¿queda la bóveda abierta si no se hace LOGOUT?
+make huella ARCHIVO=x   # SHA-256 del criptograma, para comparar por fuera
 make lint       # análisis estático de las diecisiete unidades
 make top        # corre los siete programas sobre el procesador completo
 make archivo    # cifra y descifra un archivo completo sobre el RTL
@@ -373,6 +381,44 @@ cabecera, los datos de un archivo cargado en `0x4000` empiezan en `0x4008`.
 
 ---
 
+## El bundle, y cuánto se usa de él
+
+Un bundle de CERBERO tiene cinco ranuras y el procesador las ejecuta todas en
+el mismo ciclo. Un programa que pone una sola instrucción por bundle es
+correcto, pero desperdicia cuatro quintas partes de la máquina.
+
+```bash
+make ocupacion                        # el informe, programa por programa
+python3 tools/empacar.py x.s -o y.s   # empaquetar uno
+```
+
+`tools/empacar.py` es el planificador: toma un programa escrito una operación
+por bundle y junta en el mismo bundle las que son independientes, respetando
+la latencia de tres, los puertos de escritura y el orden de la memoria. No
+tiene tablas de opcodes propias — importa las de `cerbero_asm.py`, para que el
+día que cambie una codificación no queden dos versiones de la verdad.
+
+**Lo que empaquetar no puede arreglar.** Una cadena de operaciones dependientes
+cuesta tres bundles por eslabón aunque las cinco ranuras estén libres: el
+bundle queda vacío porque no hay trabajo independiente, no porque falten
+ranuras. En un lazo, el trabajo independiente son las otras vueltas, y
+desenrollarlo es lo que las pone a la vista del planificador.
+
+`make vliw` lo mide sobre el mismo cálculo escrito de las dos formas:
+
+| | ciclos | ocupación |
+|---|---:|---:|
+| `suma_simple.s` tal cual | 1042 | 0.48 |
+| `suma_simple.s` empaquetado | 592 | 0.75 |
+| `suma_vliw.s` desenrollado | 318 | 0.73 |
+| `suma_vliw.s` desenrollado y empaquetado | **262** | **0.96** |
+
+Los cuatro dan 89440. El empaquetado solo vale 1.76×; desenrollar y empaquetar,
+**3.98×**. La guía completa, con los patrones y el ejemplo mínimo, está en
+[`docs/escribir_programas.md`](docs/escribir_programas.md).
+
+---
+
 ## Cobertura actual
 
 | Unidad | Casos | Qué verifica |
@@ -405,7 +451,9 @@ cabecera, los datos de un archivo cargado en `0x4000` empiezan en `0x4008`.
 | `credencial` | 7 | **La credencial equivocada**: el `LOGIN` no coincide, `AUTHFAIL` se enciende, las rondas se anulan con `DENIED` y el archivo queda sin cifrar |
 | `ejemplos` | 23 | **Los programas de demostración, comprobados**: `fibonacci.s` contra la sucesión que el testbench calcula por su cuenta, los seis resultados de `estadisticas.s` (que llama a `__div32` con enlace y retorno) y las tres fotos del PSW de `sesion_sin_logout.s` |
 | `sum` | 3 | **La validación con CE1108**: `suma_10_15.s`, ensamblado con `cerbero_asm.py` y corriendo en este procesador. El origen del programa y la evidencia de la validación conjunta están en [`docs/compiler-integration.md`](docs/compiler-integration.md) |
-| **Total** | **1748** | |
+| `logout` | 15 | **La bóveda sin `LOGOUT`**: una rutina abre sesión dentro de la región segura y vuelve sin cerrarla; el hardware la cierra solo al cruzar la frontera, y una ronda intentada después se anula con `DENIED`. Registra el ciclo y el PC de cada flanco de `AUTH` |
+| `vliw` | 7 | **Cuánto cuesta no llenar el bundle**: el mismo cálculo con y sin trabajo independiente, verificando que dan el mismo resultado y midiendo los ciclos de cada uno |
+| **Total** | **1775** | |
 
 A eso se suman **151 casos** de las herramientas en Python, que `make` corre antes y después de los testbenches:
 
@@ -424,7 +472,7 @@ cosa parecida.
 
 ### Autoprueba del arnés
 
-Un testbench que siempre pasa no prueba nada. Los veintiocho aceptan `-DFORCE_FAIL`,
+Un testbench que siempre pasa no prueba nada. Los treinta aceptan `-DFORCE_FAIL`,
 que inyecta un caso deliberadamente incorrecto para comprobar que el arnés sabe
 reportar una falla:
 

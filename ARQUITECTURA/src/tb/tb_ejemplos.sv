@@ -66,6 +66,7 @@ module tb_ejemplos;
   localparam int W_FIB = 32'h0100 / 4;         // 64,  47 palabras
   localparam int W_EST = 32'h0040 / 4;         // 16,   6 palabras
   localparam int W_SES = 32'h0300 / 4;         // 192,  3 palabras
+  localparam int W_CNT = 32'h0400 / 4;         // 256, 10 palabras
 
   localparam int N_FIB = 47;
 
@@ -73,11 +74,11 @@ module tb_ejemplos;
   // Tres procesadores identicos, un programa cada uno
   // ---------------------------------------------------------------------------
 
-  logic             halt_f, halt_e, halt_s;
-  logic [`XLEN-1:0] psw_f,  psw_e,  psw_s;
+  logic             halt_f, halt_e, halt_s, halt_c;
+  logic [`XLEN-1:0] psw_f,  psw_e,  psw_s,  psw_c;
 
   /* verilator lint_off UNUSEDSIGNAL */
-  logic [`NREGS-1:0][`XLEN-1:0] regs_f, regs_e, regs_s;
+  logic [`NREGS-1:0][`XLEN-1:0] regs_f, regs_e, regs_s, regs_c;
   /* verilator lint_on UNUSEDSIGNAL */
 
   top #(
@@ -105,6 +106,15 @@ module tb_ejemplos;
   ) ses (
       .clk (clk), .rst_n (rst_n),
       .halted (halt_s), .psw (psw_s), .dbg_regs (regs_s)
+  );
+
+  top #(
+      .NUM_BUNDLES (N_BUNDLES),
+      .NUM_WORDS   (N_WORDS),
+      .RESET_PC    (32'h0000_0000)
+  ) cnt (
+      .clk (clk), .rst_n (rst_n),
+      .halted (halt_c), .psw (psw_c), .dbg_regs (regs_c)
   );
 
   // ---------------------------------------------------------------------------
@@ -196,6 +206,7 @@ module tb_ejemplos;
     $readmemh("../../tools/programas/fibonacci.hex",   fib.u_imem.storage);
     $readmemh("../../tools/programas/estadisticas.hex", est.u_imem.storage);
     $readmemh("../../tools/programas/sesion_sin_logout.hex", ses.u_imem.storage);
+    $readmemh("../../tools/programas/contar_hasta_n.hex", cnt.u_imem.storage);
     // estadisticas.s es el unico de los tres con seccion .data: el arreglo de
     // ocho palabras que recorre.
     $readmemh("../../tools/programas/estadisticas_datos.hex", est.u_dmem.storage);
@@ -207,7 +218,7 @@ module tb_ejemplos;
     #1 rst_n = 1'b1;
 
     c = 0;
-    while (!(halt_f && halt_e && halt_s) && c < TOPE) begin
+    while (!(halt_f && halt_e && halt_s && halt_c) && c < TOPE) begin
       @(posedge clk);
       c = c + 1;
     end
@@ -286,6 +297,28 @@ module tb_ejemplos;
     check_int("y la causa es DENIED",
               psw_s[`PSW_CAUSE], `CAUSE_DENIED);
     check_int("la sesion quedo cerrada", psw_s[`PSW_AUTH], 1'b0);
+
+    // ------------------------------------------------------------------------
+    $display("");
+    $display("[4] contar_hasta_n.s: el lazo minimo del manual");
+    // ------------------------------------------------------------------------
+    // Es el programa de referencia de docs/escribir_programas.md, el que se
+    // escribe de memoria en una revision. Que este aqui comprobado es lo que
+    // lo distingue de un ejemplo que nadie corrio.
+
+    check_int("el programa llego a HALT", halt_c, 1'b1);
+    check_int("sin fallas en su PSW", psw_c[`PSW_EXC], 1'b0);
+
+    // Guarda 1, 2, 3 ... 10 desde 0x400
+    malos = 0;
+    for (i = 0; i < 10; i = i + 1)
+      if (cnt.u_dmem.storage[W_CNT + i] !== i + 1) malos = malos + 1;
+    check_int("guardo 1 a 10 en memoria desde 0x400", malos, 0);
+
+    // Y la suma, que es 1+2+...+10 = 55
+    check32("la suma quedo en r6", regs_c[6], 32'd55);
+    check32("y tambien en 0x440",
+            cnt.u_dmem.storage[32'h0440 / 4], 32'd55);
 
 `ifdef FORCE_FAIL
     // ------------------------------------------------------------------------
