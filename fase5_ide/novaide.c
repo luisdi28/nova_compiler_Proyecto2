@@ -40,6 +40,7 @@ static void uso(void) {
         "  completar <archivo> --linea N --columna M\n"
         "                                    Sugerencias de codigo en esa posicion\n"
         "  arreglar <archivo>                Correcciones automaticas propuestas\n"
+        "  bloques <archivo>                 Bloques basicos y grafo de flujo\n"
         "  clones <archivo>...               Clones Tipo I, II y III entre archivos\n"
         "  tokens <archivo>                  Flujo de tokens con su categoria de color\n"
         "  catalogo                          Catalogo de diagnosticos del lenguaje\n"
@@ -157,6 +158,8 @@ int main(int argc, char **argv) {
         rc = ide_completar(rutas[0], linea, columna, &j);
     } else if (strcmp(trabajo, "arreglar") == 0) {
         rc = ide_arreglar(rutas[0], &j);
+    } else if (strcmp(trabajo, "bloques") == 0) {
+        rc = ide_bloques(rutas[0], &j);
     } else if (strcmp(trabajo, "tokens") == 0) {
         rc = ide_tokens_json(rutas[0], &j);
     } else if (strcmp(trabajo, "clones") == 0) {

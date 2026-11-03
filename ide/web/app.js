@@ -31,6 +31,9 @@ const App = {
   tokens: [],
   simbolos: [],
   etiquetas: [],
+  flujo: null,
+  flujoFuncion: 0,
+  flujoBloque: null,
   correcciones: [],
   sugerencias: [],
   seleccion: 0,
@@ -562,6 +565,206 @@ function mostrarSimbolos() {
       if (l > 0) irA(l, +t.dataset.columna);
     };
   });
+}
+
+/* ------------------------------------------- panel de flujo (Iteracion 2) */
+
+/*
+ * Reparte los bloques en niveles para dibujarlos.
+ *
+ * El nivel de un bloque es el camino mas largo desde la entrada contando solo
+ * aristas HACIA ADELANTE. Las aristas de regreso -- las que cierran un lazo--
+ * se excluyen del calculo: si contaran, el nivel de un bloque dentro de un
+ * ciclo no tendria un valor finito. Asi un 'si/aliter' queda con sus dos ramas
+ * lado a lado y el lazo se dibuja como un arco que sube.
+ */
+function nivelarBloques(lista) {
+  const nivel = lista.map(() => 0);
+  for (const b of lista) {
+    for (const s of b.sucesores) {
+      if (s <= b.id) continue;                 // arista de regreso
+      if (nivel[s] < nivel[b.id] + 1) nivel[s] = nivel[b.id] + 1;
+    }
+  }
+  const filas = [];
+  lista.forEach((b) => {
+    (filas[nivel[b.id]] = filas[nivel[b.id]] || []).push(b);
+  });
+  return { nivel, filas };
+}
+
+const NODO_W = 152, NODO_H = 46, SEP_X = 30, SEP_Y = 52, MARGEN = 26;
+
+function dibujarGrafo(fn) {
+  const lienzo = $("flujo-lienzo");
+  const lista = fn.lista;
+  if (!lista.length) { lienzo.innerHTML = '<div class="vacio">Sin bloques.</div>'; return; }
+
+  const { filas } = nivelarBloques(lista);
+  const pos = {};
+  let anchoMax = 0;
+
+  filas.forEach((fila, nv) => {
+    if (!fila) return;
+    const ancho = fila.length * NODO_W + (fila.length - 1) * SEP_X;
+    anchoMax = Math.max(anchoMax, ancho);
+    fila.forEach((b, k) => {
+      pos[b.id] = { x: k * (NODO_W + SEP_X) - ancho / 2, y: nv * (NODO_H + SEP_Y) };
+    });
+  });
+
+  const W = anchoMax + 2 * MARGEN + 90;
+  const H = filas.length * (NODO_H + SEP_Y) + 2 * MARGEN;
+  const cx = W / 2;
+  Object.values(pos).forEach((p) => { p.x += cx; p.y += MARGEN; });
+
+  const aristas = [];
+  for (const b of lista) {
+    b.sucesores.forEach((s, idx) => {
+      const a = pos[b.id], d = pos[s];
+      if (!a || !d) return;
+      const regreso = s <= b.id;
+      const x1 = a.x + NODO_W / 2, y1 = a.y + NODO_H;
+      const x2 = d.x + NODO_W / 2, y2 = d.y;
+
+      let camino;
+      if (regreso) {
+        // Arco por fuera, para no cruzar los nodos intermedios.
+        const lado = x1 + NODO_W / 2 + 34;
+        camino = `M ${x1} ${y1} C ${lado} ${y1 + 16}, ${lado} ${y2 - 16}, ${x2} ${y2 - 2}`;
+      } else {
+        const medio = (y1 + y2) / 2;
+        camino = `M ${x1} ${y1} C ${x1} ${medio}, ${x2} ${medio}, ${x2} ${y2 - 2}`;
+      }
+      // En un condicional, el primer sucesor es el destino del salto y el
+      // segundo la caida; se marca para poder leerlos distinto.
+      const clase = regreso ? "regreso" : (b.fin === "condicional" && idx === 1 ? "falso" : "");
+      aristas.push(`<path class="arista ${clase}" d="${camino}"/>`);
+    });
+  }
+
+  const nodos = lista.map((b) => {
+    const p = pos[b.id];
+    const clases = ["nodo"];
+    if (b.entrada) clases.push("entrada");
+    if (!b.alcanzable) clases.push("muerto");
+    if (b.profundidad_ciclo > 0) clases.push("lazo");
+    if (App.flujoBloque === b.id) clases.push("sel");
+    const etq = b.etiqueta ? ` ${b.etiqueta}` : "";
+    return `<g class="${clases.join(" ")}" data-b="${b.id}" transform="translate(${p.x},${p.y})">
+      <rect width="${NODO_W}" height="${NODO_H}"/>
+      <text class="n-tit" x="10" y="19">B${b.id}${escapar(etq)}</text>
+      <text class="n-sub" x="10" y="34">${b.instrucciones} inst · ${escapar(b.fin)}</text>
+    </g>`;
+  }).join("");
+
+  lienzo.innerHTML = `
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+      <defs>
+        <marker id="punta" markerWidth="9" markerHeight="9" refX="8" refY="3"
+                orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L8,3 z" fill="#4a5570"/>
+        </marker>
+        <marker id="punta-lazo" markerWidth="9" markerHeight="9" refX="8" refY="3"
+                orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L0,6 L8,3 z" fill="#e2b341"/>
+        </marker>
+      </defs>
+      ${aristas.join("")}
+      ${nodos}
+    </svg>
+    <div class="leyenda">
+      <span><i></i>flujo normal</span>
+      <span><i class="regreso"></i>arista de regreso (lazo)</span>
+      <span><i class="caja"></i>entrada</span>
+      <span><i class="muerta"></i>inalcanzable</span>
+    </div>`;
+
+  lienzo.querySelectorAll(".nodo").forEach((n) => {
+    n.onclick = () => { App.flujoBloque = +n.dataset.b; dibujarGrafo(fn); detalleBloque(fn); };
+  });
+}
+
+function detalleBloque(fn) {
+  const caja = $("flujo-detalle");
+  const b = fn.lista.find((x) => x.id === App.flujoBloque);
+  if (!b) {
+    caja.innerHTML = '<div class="vacio">Clic en un bloque para ver su codigo.</div>';
+    return;
+  }
+  const lista = (v) => v.length ? v.map((x) => "B" + x).join(", ") : "ninguno";
+  caja.innerHTML = `
+    <h4>B${b.id}${b.etiqueta ? " (" + escapar(b.etiqueta) + ")" : ""}</h4>
+    <div class="meta">
+      <span>${b.instrucciones} instrucciones</span>
+      <span>termina en ${escapar(b.fin)}</span>
+      ${b.entrada ? "<span>entrada</span>" : ""}
+      ${b.alcanzable ? "" : "<span>inalcanzable</span>"}
+      ${b.profundidad_ciclo > 0 ? `<span>en lazo (nivel ${b.profundidad_ciclo})</span>` : ""}
+      <span>predecesores: ${lista(b.predecesores)}</span>
+      <span>sucesores: ${lista(b.sucesores)}</span>
+    </div>
+    <pre>${b.codigo.map((c) =>
+      (c.linea > 0 ? `<b data-l="${c.linea}" data-c="${c.columna}">${String(c.linea).padStart(3)}</b>  `
+                   : "  ·  ") + escapar(c.texto)).join("\n")}</pre>`;
+  caja.querySelectorAll("b[data-l]").forEach((e) => {
+    e.onclick = () => irA(+e.dataset.l, +e.dataset.c || 1);
+  });
+}
+
+async function construirFlujo() {
+  const boton = $("btn-flujo");
+  boton.disabled = true;
+  boton.textContent = "Construyendo...";
+  try {
+    const r = await pedir("bloques", { nombre: App.actual, contenido: codigo.value });
+    App.flujo = r;
+    App.flujoBloque = null;
+    mostrarFlujo();
+  } finally {
+    boton.disabled = false;
+    boton.textContent = "Construir grafo";
+  }
+}
+
+function mostrarFlujo() {
+  const r = App.flujo;
+  const sel = $("flujo-funcion");
+  const datos = $("flujo-datos");
+  const c = $("c-flujo");
+
+  if (!r || !r.ok) {
+    sel.innerHTML = "";
+    datos.innerHTML = "";
+    c.textContent = "0";
+    c.className = "contador";
+    $("flujo-lienzo").innerHTML =
+      `<div class="vacio"><span class="grande">⌁</span>${escapar(
+        (r && r.motivo) || "Pulse «Construir grafo» para analizar el archivo.")}</div>`;
+    $("flujo-detalle").innerHTML = "";
+    return;
+  }
+
+  c.textContent = r.resumen.bloques;
+  c.className = "contador" + (r.resumen.inalcanzables ? " hay" : "");
+
+  if (App.flujoFuncion >= r.funciones.length) App.flujoFuncion = 0;
+  sel.innerHTML = r.funciones.map((f, i) =>
+    `<option value="${i}"${i === App.flujoFuncion ? " selected" : ""}>${escapar(f.nombre)} (${f.bloques} bloques)</option>`).join("");
+  sel.onchange = () => {
+    App.flujoFuncion = +sel.value;
+    App.flujoBloque = null;
+    mostrarFlujo();
+  };
+
+  const fn = r.funciones[App.flujoFuncion];
+  datos.innerHTML =
+    `<span>${fn.bloques} bloques</span><span>${fn.aristas} aristas</span>` +
+    (fn.inalcanzables ? `<span class="alerta">${fn.inalcanzables} inalcanzable${fn.inalcanzables === 1 ? "" : "s"}</span>` : "") +
+    `<span>total: ${r.resumen.bloques} bloques en ${r.resumen.funciones} funciones</span>`;
+
+  dibujarGrafo(fn);
+  detalleBloque(fn);
 }
 
 /* ---------------------------------------------------- panel de clones */
@@ -1121,6 +1324,12 @@ function conectar() {
   $("btn-compilar").onclick = compilar;
   $("btn-guardar").onclick = guardar;
   $("btn-clones").onclick = buscarClones;
+  $("btn-flujo").onclick = construirFlujo;
+  $("btn-expandir").onclick = () => {
+    document.body.classList.toggle("panel-alto");
+    $("btn-expandir").textContent =
+      document.body.classList.contains("panel-alto") ? "Reducir panel" : "Ampliar panel";
+  };
   $("btn-recargar").onclick = cargarListaArchivos;
   $("filtro-archivos").oninput = cargarListaArchivos;
   $("nombre-archivo").onchange = (e) => {

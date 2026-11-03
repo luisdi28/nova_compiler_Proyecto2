@@ -324,7 +324,7 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
  * indicio: la onda sola es facil de pasar por alto en una pantalla de
  * proyector, que es donde se va a ver esto en la defensa.
  */
-.sub {
+.capa-subrayado .sub {
   text-decoration-line: underline;
   text-decoration-style: wavy;
   text-decoration-skip-ink: none;
@@ -332,11 +332,11 @@ button, input, select { font-family: inherit; font-size: inherit; color: inherit
   text-underline-offset: 3px;
   border-radius: 2px;
 }
-.sub-error {
+.capa-subrayado .sub-error {
   text-decoration-color: var(--rojo-claro);
   background: rgba(255, 107, 107, .13);
 }
-.sub-advertencia {
+.capa-subrayado .sub-advertencia {
   text-decoration-color: var(--ambar);
   background: rgba(226, 179, 65, .13);
 }
@@ -727,3 +727,124 @@ table.datos .tip { color: var(--verde); }
   letter-spacing: .7px;
   text-transform: uppercase;
 }
+
+/* --------------------------------------------- grafo de flujo (Iteracion 2) */
+
+.flujo-barra {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 4px 2px 13px;
+  border-bottom: 1px solid var(--borde-suave);
+  margin-bottom: 11px;
+  color: var(--texto-tenue);
+  font-size: 11.5px;
+}
+.flujo-barra select {
+  margin-left: 7px;
+  padding: 4px 8px;
+  background: var(--fondo-3);
+  border: 1px solid var(--borde);
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.flujo-barra select:focus { outline: none; border-color: var(--acento); }
+.flujo-barra button { margin-left: auto; }
+
+.flujo-datos { display: flex; gap: 8px; flex-wrap: wrap; }
+.flujo-datos span {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--fondo-3);
+  color: var(--texto-tenue);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+.flujo-datos span.alerta { background: #3a2328; color: var(--rojo-claro); }
+
+.flujo-cuerpo { display: grid; grid-template-columns: 1fr 320px; gap: 12px; }
+.flujo-lienzo { overflow: auto; background: var(--fondo-2); border-radius: 8px; padding: 10px; }
+.flujo-lienzo svg { display: block; }
+
+/* Nodos del grafo */
+.nodo rect {
+  fill: var(--fondo-3);
+  stroke: #39415a;
+  stroke-width: 1.3;
+  rx: 7;
+  transition: fill .12s, stroke .12s;
+}
+.nodo:hover rect { fill: #262d3d; stroke: var(--acento); cursor: pointer; }
+.nodo.sel rect { fill: var(--acento-tenue); stroke: var(--acento); }
+.nodo.entrada rect { stroke: var(--verde); }
+.nodo.muerto rect { stroke: var(--rojo-claro); stroke-dasharray: 4 3; }
+.nodo.lazo rect { fill: #1d2433; }
+.nodo .n-tit { fill: var(--texto); font: 600 12px var(--mono); }
+.nodo .n-sub { fill: var(--texto-debil); font: 10px var(--mono); }
+.nodo.sel .n-tit { fill: #dce8ff; }
+
+/* El subrayado de errores vive solo en la capa del editor. Sin esta
+ * restriccion, su clase .sub alcanzaba tambien a los textos del grafo. */
+
+.arista { fill: none; stroke: #4a5570; stroke-width: 1.5; marker-end: url(#punta); }
+.arista.regreso { stroke: var(--ambar); stroke-dasharray: 5 4; marker-end: url(#punta-lazo); }
+.arista.falso { stroke: #55607d; }
+
+.flujo-detalle {
+  overflow: auto;
+  background: var(--fondo-2);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 11.5px;
+}
+.flujo-detalle h4 {
+  margin: 0 0 9px;
+  color: var(--texto);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+.flujo-detalle .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 11px; }
+.flujo-detalle .meta span {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--fondo-3);
+  color: var(--texto-tenue);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.flujo-detalle pre {
+  margin: 0;
+  padding: 9px 11px;
+  background: var(--fondo);
+  border-radius: 6px;
+  color: var(--texto-tenue);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.flujo-detalle pre b { color: var(--acento); font-weight: 400; cursor: pointer; }
+.flujo-detalle pre b:hover { text-decoration: underline; }
+.leyenda { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 11px; color: var(--texto-debil); font-size: 10.5px; }
+.leyenda i { display: inline-block; width: 16px; height: 0; border-top: 2px solid #4a5570; vertical-align: middle; margin-right: 5px; }
+.leyenda i.regreso { border-top: 2px dashed var(--ambar); }
+.leyenda i.caja { width: 11px; height: 11px; border: 1.5px solid var(--verde); border-radius: 3px; }
+.leyenda i.muerta { width: 11px; height: 11px; border: 1.5px dashed var(--rojo-claro); border-radius: 3px; }
+
+
+/* El panel inferior se puede agrandar: el grafo de flujo necesita altura. */
+body.panel-alto .disposicion { grid-template-rows: 1fr 72vh; }
+.btn-expandir {
+  margin-left: auto;
+  align-self: center;
+  padding: 3px 10px;
+  background: none;
+  border: 1px solid var(--borde);
+  border-radius: 5px;
+  color: var(--texto-debil);
+  cursor: pointer;
+  font-size: 11px;
+}
+.btn-expandir:hover { color: var(--texto); border-color: #39415a; }

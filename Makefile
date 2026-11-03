@@ -4,6 +4,7 @@ PARSE_DIR := fase2_sintactico
 SEM_DIR := fase3_semantico
 GEN_DIR := fase4_codigo
 
+OPT_DIR := fase6_optimizacion
 IDE_DIR := fase5_ide
 
 BIN := novac
@@ -11,7 +12,7 @@ IDE_BIN := novaide
 # -MMD -MP genera los .d con las dependencias de encabezados: cambiar un .h
 # recompila lo que lo incluye. Sin esto, editar symtab.h dejaba objetos
 # compilados contra estructuras distintas.
-CFLAGS := -Wall -Wextra -g -MMD -MP -I$(LEX_DIR) -I$(PARSE_DIR) -I$(SEM_DIR) -I$(GEN_DIR) -I$(IDE_DIR)
+CFLAGS := -Wall -Wextra -g -MMD -MP -I$(LEX_DIR) -I$(PARSE_DIR) -I$(SEM_DIR) -I$(GEN_DIR) -I$(OPT_DIR) -I$(IDE_DIR)
 
 SRCS = main.c \
        $(LEX_DIR)/diag.c \
@@ -22,7 +23,8 @@ SRCS = main.c \
        $(SEM_DIR)/symtab.c \
        $(SEM_DIR)/semantic.c \
        $(GEN_DIR)/tac.c \
-       $(GEN_DIR)/codegen.c
+       $(GEN_DIR)/codegen.c \
+       $(OPT_DIR)/bloques.c
 
 OBJS = $(SRCS:.c=.o)
 
@@ -39,12 +41,13 @@ IDE_SRCS = $(IDE_DIR)/novaide.c \
            $(IDE_DIR)/ide_diag.c \
            $(IDE_DIR)/ide_completar.c \
            $(IDE_DIR)/ide_arreglar.c \
-           $(IDE_DIR)/ide_clones.c
+           $(IDE_DIR)/ide_clones.c \
+           $(IDE_DIR)/ide_bloques.c
 
 IDE_OBJS = $(IDE_SRCS:.c=.o)
 DEPS = $(OBJS:.o=.d) $(IDE_OBJS:.o=.d)
 
-.PHONY: all ide prueba-ide prueba test tabla arbol ensamblador binario paquetes ocupacion entregables generar generar-prueba ejecutar-prueba ejecutar-prueba-rtl prueba-rtl prueba-rtl-simple prueba-rtl-integracion prueba-rtl-objeto prueba-rtl-matriz prueba-rtl-matriz-1000 prueba-rtl-transpuesta prueba-rtl-producto-punto prueba-rtl-multiplicacion prueba-rtl-busqueda prueba-rtl-factorial prueba-rtl-propuesto prueba-rtl-crypto prueba-rtl-cifrado prueba-rtl-descifrado depurar verificar clean limpiar
+.PHONY: all ide prueba-ide bloques prueba test tabla arbol ensamblador binario paquetes ocupacion entregables generar generar-prueba ejecutar-prueba ejecutar-prueba-rtl prueba-rtl prueba-rtl-simple prueba-rtl-integracion prueba-rtl-objeto prueba-rtl-matriz prueba-rtl-matriz-1000 prueba-rtl-transpuesta prueba-rtl-producto-punto prueba-rtl-multiplicacion prueba-rtl-busqueda prueba-rtl-factorial prueba-rtl-propuesto prueba-rtl-crypto prueba-rtl-cifrado prueba-rtl-descifrado depurar verificar clean limpiar
 
 all: $(BIN) $(IDE_BIN)
 

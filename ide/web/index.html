@@ -84,14 +84,30 @@
       <button class="pestana activa" data-panel="problemas">Problemas <span class="contador" id="c-problemas">0</span></button>
       <button class="pestana" data-panel="correcciones">Correcciones <span class="contador" id="c-correcciones">0</span></button>
       <button class="pestana" data-panel="simbolos">Tabla de simbolos <span class="contador" id="c-simbolos">0</span></button>
+      <button class="pestana" data-panel="flujo">Flujo <span class="contador" id="c-flujo">0</span></button>
       <button class="pestana" data-panel="clones">Clones <span class="contador" id="c-clones">0</span></button>
       <button class="pestana" data-panel="salida">Salida</button>
+      <button id="btn-expandir" class="btn-expandir">Ampliar panel</button>
     </nav>
 
     <div class="panel-cuerpo">
       <div class="vista activa" id="v-problemas"></div>
       <div class="vista" id="v-correcciones"></div>
       <div class="vista" id="v-simbolos"></div>
+      <div class="vista" id="v-flujo">
+        <div class="flujo-barra">
+          <label>Funcion
+            <select id="flujo-funcion"></select>
+          </label>
+          <span id="flujo-datos" class="flujo-datos"></span>
+          <button id="btn-flujo" class="btn btn-primario">Construir grafo</button>
+        </div>
+        <div class="flujo-cuerpo">
+          <div class="flujo-lienzo" id="flujo-lienzo"></div>
+          <aside class="flujo-detalle" id="flujo-detalle"></aside>
+        </div>
+      </div>
+
       <div class="vista" id="v-clones">
         <div class="clones-barra">
           <label>Tokens minimos

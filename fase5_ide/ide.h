@@ -60,6 +60,14 @@ int ide_completar(const char *ruta, int linea, int columna, JsonW *j);
 
 int ide_arreglar(const char *ruta, JsonW *j);
 
+/* ------------------------------------------------- grafo de flujo (Iter. 2) */
+
+/*
+ * Bloques basicos y aristas del grafo de flujo de control. El analisis lo
+ * hace fase6_optimizacion/bloques.c; aqui solo se serializa.
+ */
+int ide_bloques(const char *ruta, JsonW *j);
+
 /* ------------------------------------------------------- deteccion de clones */
 
 #define IDE_MAX_ARCHIVOS 64

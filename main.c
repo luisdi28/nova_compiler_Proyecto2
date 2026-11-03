@@ -20,6 +20,7 @@
 #include "symtab.h"
 #include "tac.h"
 #include "codegen.h"
+#include "bloques.h"
 
 extern FILE *yyin;
 extern char *yytext;
@@ -60,6 +61,7 @@ static int modo_arbol = 0;
 static int modo_lexer = 0;
 static int modo_symtab = 0;
 static int modo_ir = 0;
+static int modo_bloques = 0;
 static int modo_asm = 0;
 static int modo_ensamblar = 0;
 static int modo_paquetes = 0;
@@ -299,6 +301,7 @@ static void print_usage(const char *prog) {
         "  -t                Imprime el arbol sintactico (AST)\n"
         "  --sym, -m         Imprime la tabla de simbolos (Fase 3)\n"
         "  --ir              Codigo de tres direcciones (Fase 4)\n"
+        "  --bloques         Bloques basicos y grafo de flujo de control\n"
         "  -s                Genera binario y ensamblador .asm; tambien lo muestra\n"
         "  -x                Ensambla un archivo .s a imagen binaria .hex\n"
         "  -p                Muestra paquetes con slots y codificacion hexadecimal\n"
@@ -318,6 +321,7 @@ static const struct option opciones_largas[] = {
     {"tokens",  no_argument, NULL, 'l'},
     {"sym",     no_argument, NULL, 'm'},
     {"ir",      no_argument, NULL, 1001},
+    {"bloques", no_argument, NULL, 1004},
     {"version", no_argument, NULL, 1002},
     {"max-errors", required_argument, NULL, 1003},
     {"help",    no_argument, NULL, 'h'},
@@ -348,6 +352,7 @@ int main(int argc, char **argv) {
             }
             case 1002: printf("novac (Nova) 0.5 - fases 1 a 6: lexico, sintactico, semantico,\n       ensamblador, calculo de saltos y binario CERBERO\n"); return 0;
             case 1001: modo_ir = 1; break;
+            case 1004: modo_bloques = 1; break;
             case 'o': archivo_salida = optarg; break;
             case 'v': modo_verbose = 1; break;
             case 't': modo_arbol = 1; break;
@@ -391,7 +396,7 @@ int main(int argc, char **argv) {
     int extra_count = argc - optind - 1;
     if (modo_ensamblar) {
         if (extra_count > 0 || modo_objeto || modo_lexer || modo_arbol ||
-            modo_symtab || modo_ir || modo_asm || modo_paquetes) {
+            modo_symtab || modo_ir || modo_bloques || modo_asm || modo_paquetes) {
             fprintf(stderr, "novac: -x recibe un solo .s y no se combina con opciones de inspeccion o -c\n");
             return 2;
         }
@@ -414,7 +419,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "novac: -c recibe un solo modulo fuente por invocacion\n");
         return 2;
     }
-    if ((modo_lexer || modo_arbol || modo_symtab || modo_ir || modo_asm || modo_paquetes) && extra_count > 0) {
+    if ((modo_lexer || modo_arbol || modo_symtab || modo_ir || modo_bloques || modo_asm || modo_paquetes) && extra_count > 0) {
         fprintf(stderr, "novac: las opciones de inspeccion reciben un solo archivo\n");
         return 2;
     }
@@ -490,8 +495,8 @@ int main(int argc, char **argv) {
      */
     if (modo_verbose) fprintf(stderr, "== Fase 3: Analisis Semantico -- %s ==\n", archivo_fuente);
 
-    if (!modo_arbol && (modo_objeto || modo_symtab || modo_ir || modo_asm || modo_paquetes ||
-                        (!modo_arbol && !modo_symtab && !modo_ir && !modo_asm && !modo_paquetes))) {
+    if (!modo_arbol && (modo_objeto || modo_symtab || modo_ir || modo_bloques || modo_asm || modo_paquetes ||
+                        (!modo_arbol && !modo_symtab && !modo_ir && !modo_bloques && !modo_asm && !modo_paquetes))) {
         if (!link_modules(raiz_ast, archivo_fuente, extra_paths, extra_count)) {
             liberar_ast(raiz_ast);
             release_modules();
@@ -602,9 +607,9 @@ int main(int argc, char **argv) {
      * binario, como dice el documento. --ir y -s son volcados de texto que
      * reemplazan al binario para poder revisar la fase por partes.
      */
-    int modo_binario = (!modo_ir && !modo_arbol && !modo_symtab && !modo_paquetes);
+    int modo_binario = (!modo_ir && !modo_bloques && !modo_arbol && !modo_symtab && !modo_paquetes);
 
-    if (modo_ir || modo_asm || modo_paquetes || modo_binario) {
+    if (modo_ir || modo_bloques || modo_asm || modo_paquetes || modo_binario) {
         if (modo_verbose) fprintf(stderr, "== Fase 4: Generacion de codigo -- %s ==\n", archivo_fuente);
 
         TACList *tac = tac_generate_from_ast(raiz_ast, tabla);
@@ -624,6 +629,31 @@ int main(int argc, char **argv) {
                 }
             }
             tac_print(salida, tac);
+            if (salida != stdout) fclose(salida);
+        }
+        if (modo_bloques) {
+            /*
+             * Bloques basicos y grafo de flujo. Se construye sobre la misma
+             * lista de tres direcciones que alimenta a la fase 4, no sobre una
+             * copia: lo que se dibuja aqui es exactamente el codigo que se va
+             * a traducir.
+             */
+            FILE *salida = stdout;
+            GrafoFlujo *g;
+            if (archivo_salida != NULL) {
+                salida = fopen(archivo_salida, modo_ir ? "a" : "w");
+                if (salida == NULL) {
+                    fprintf(stderr, "novac: no se pudo escribir '%s'\n", archivo_salida);
+                    tac_free(tac);
+                    symtab_destroy(tabla);
+                    liberar_ast(raiz_ast);
+                    release_modules();
+                    return 3;
+                }
+            }
+            g = cfg_construir(tac);
+            cfg_imprimir(salida, g);
+            cfg_liberar(g);
             if (salida != stdout) fclose(salida);
         }
         if (modo_asm) {

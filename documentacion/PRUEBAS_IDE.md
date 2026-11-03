@@ -18,7 +18,7 @@ sh tools/verificar.sh 12   # codificación idéntica al ensamblador de CE4301
 
 | Comando | Debe decir |
 |---|---|
-| `make prueba-ide` | `pruebas del IDE: 52 correctas, 0 fallidas` |
+| `make prueba-ide` | `pruebas del IDE: 69 correctas, 0 fallidas` |
 | `make prueba` | `pruebas: 233 correctas, 0 fallidas` |
 | `verificar.sh 12` | `identicos: 20, distintos: 0, pendientes de enlazar: 2` |
 
@@ -194,6 +194,50 @@ se vería un tipo. El IDE reintenta analizando el mismo texto sin el prefijo.
 
 ---
 
+## 3bis. Grafo de flujo (Iteración 2)
+
+### Grafo de un ciclo con condicionales
+
+**Hacé:** abrí `test/ide/cfg_ciclo.nv` → pestaña **Flujo** → `Construir grafo`.
+
+**Debe pasar:** 9 bloques y 11 aristas en `clasificar`. En el dibujo:
+
+- `B1 (L0)` es la cabeza del lazo, con dos salidas.
+- Una **línea ámbar discontinua** sube desde el último bloque del cuerpo hasta
+  `B1`: es la arista de regreso que cierra el ciclo.
+- Los bloques del cuerpo tienen el fondo más oscuro (están en lazo); el de
+  salida, no.
+
+Clic en cualquier bloque muestra su código de tres direcciones, y cada
+instrucción enlaza con la línea del fuente que la originó.
+
+Usá el botón **Ampliar panel** para que el grafo se vea completo.
+
+### Código muerto
+
+**Hacé:** abrí `test/ide/cfg_muerto.nv` y construí el grafo.
+
+**Debe pasar:** un bloque con **borde rojo punteado**, sin predecesores. Es el
+`scribe` que viene después del `redde`: ninguna ejecución pasa por ahí.
+
+### Contraste con la terminal
+
+```bash
+./novac --bloques test/ide/cfg_ciclo.nv
+```
+
+Debe reportar el mismo número de bloques y aristas que el IDE. Hay una prueba
+automática que lo verifica, pero mostrarlo en vivo convence más.
+
+### Caso negativo
+
+**Hacé:** borrá un `;` y construí el grafo.
+
+**Debe pasar:** no se dibuja nada y se explica por qué — el grafo se construye
+sobre el código intermedio, que solo se genera si el programa analiza limpio.
+
+---
+
 ## 4. Detección de clones (requisito 4)
 
 ### 4.1 Los tres tipos
@@ -362,4 +406,5 @@ lenguaje con su explicación y su remedio.
 7. Lo mismo en terminal con `./novac --sym` — los números coinciden.
 8. Clones con umbral 0.85: mostrar el Tipo I y el Tipo II reales del
    repositorio.
-9. Cerrar con el desplegable Compilar recorriendo las seis fases.
+9. Pestaña **Flujo**: el grafo del ciclo, con la arista de regreso en ámbar.
+10. Cerrar con el desplegable Compilar recorriendo las seis fases.

@@ -433,10 +433,103 @@ def prueba_completado():
               str(sug[:1]))
 
 
-# ---------------------------------------------------------------- 5. clones
+# ------------------------------------------------- 5. bloques basicos y CFG
+
+def prueba_bloques():
+    print("\n[5] Bloques basicos y grafo de flujo")
+
+    # --- Programa recto: una funcion sin saltos es un solo bloque ---
+    r = ide("bloques", os.path.join(AQUI, "cfg_recto.nv"))
+    comprobar("el grafo se construye sobre un programa correcto",
+              r.get("ok") is True, str(r)[:200])
+    if not r.get("ok"):
+        return
+    fn = {f["nombre"]: f for f in r["funciones"]}
+    comprobar("una funcion sin saltos es un unico bloque basico",
+              fn["sumar"]["bloques"] == 1 and fn["sumar"]["aristas"] == 0,
+              str(fn.get("sumar")))
+
+    # --- Ciclo con condicionales anidados ---
+    r = ide("bloques", os.path.join(AQUI, "cfg_ciclo.nv"))
+    fn = {f["nombre"]: f for f in r["funciones"]}["clasificar"]
+    b = {x["id"]: x for x in fn["lista"]}
+
+    comprobar("el bloque 0 es la entrada y no tiene predecesores",
+              b[0]["entrada"] and b[0]["predecesores"] == [], str(b[0]))
+
+    # Toda arista tiene su predecesor correspondiente: el grafo es coherente.
+    incoherentes = []
+    for x in fn["lista"]:
+        for s in x["sucesores"]:
+            if x["id"] not in b[s]["predecesores"]:
+                incoherentes.append(f"B{x['id']}->B{s}")
+    comprobar("cada sucesor registra a su predecesor",
+              not incoherentes, ", ".join(incoherentes))
+
+    # La suma de aristas declarada coincide con las que hay.
+    total = sum(len(x["sucesores"]) for x in fn["lista"])
+    comprobar("la cuenta de aristas coincide con las aristas listadas",
+              total == fn["aristas"], f"{total} != {fn['aristas']}")
+
+    # Un ciclo produce al menos una arista de regreso (destino <= origen).
+    regresos = [(x["id"], s) for x in fn["lista"] for s in x["sucesores"] if s <= x["id"]]
+    comprobar("un ciclo 'dum' produce una arista de regreso",
+              len(regresos) >= 1, str(regresos))
+
+    # El destino de la arista de regreso es la cabeza del lazo, y tanto ella
+    # como el cuerpo quedan marcados como 'en lazo'.
+    cabeza = regresos[0][1]
+    comprobar("la cabeza del lazo queda marcada dentro del ciclo",
+              b[cabeza]["profundidad_ciclo"] > 0, str(b[cabeza]))
+    en_lazo = [x["id"] for x in fn["lista"] if x["profundidad_ciclo"] > 0]
+    comprobar("el cuerpo del lazo queda marcado y el resto no",
+              len(en_lazo) > 1 and len(en_lazo) < fn["bloques"],
+              f"en lazo: {en_lazo} de {fn['bloques']}")
+
+    # Un condicional produce exactamente dos salidas.
+    cond = [x for x in fn["lista"] if x["fin"] == "condicional"]
+    comprobar("todo bloque condicional tiene dos sucesores",
+              cond and all(len(x["sucesores"]) == 2 for x in cond),
+              str([(x["id"], x["sucesores"]) for x in cond]))
+
+    # Los dos 'si' anidados mas la condicion del 'dum' dan tres condicionales.
+    comprobar("se reconocen los tres puntos de decision del programa",
+              len(cond) == 3, f"condicionales: {[x['id'] for x in cond]}")
+
+    # Todo bloque salvo la entrada es alcanzable en este programa.
+    comprobar("no hay bloques inalcanzables en un programa sin codigo muerto",
+              fn["inalcanzables"] == 0, str(fn))
+
+    # --- Codigo muerto ---
+    r = ide("bloques", os.path.join(AQUI, "cfg_muerto.nv"))
+    fn = r["funciones"][0]
+    muertos = [x for x in fn["lista"] if not x["alcanzable"]]
+    comprobar("el codigo despues de un retorno queda en un bloque inalcanzable",
+              fn["inalcanzables"] >= 1 and len(muertos) == fn["inalcanzables"],
+              str(fn))
+    comprobar("un bloque inalcanzable no tiene predecesores",
+              all(x["predecesores"] == [] for x in muertos), str(muertos))
+
+    # --- El IDE y novac tienen que dar el mismo grafo ---
+    ruta = os.path.join(AQUI, "cfg_ciclo.nv")
+    texto = subprocess.run([NOVAC, "--bloques", ruta],
+                           capture_output=True, text=True, cwd=RAIZ).stdout
+    r = ide("bloques", ruta)
+    fn = {f["nombre"]: f for f in r["funciones"]}["clasificar"]
+    esperado = f"functio clasificar: {fn['bloques']} bloques, {fn['aristas']} aristas"
+    comprobar("'novac --bloques' y el IDE reportan el mismo grafo",
+              esperado in texto, esperado)
+
+    # --- Sin analisis limpio no hay grafo, y se explica por que ---
+    r = ide("bloques", os.path.join(AQUI, "sin_punto_coma.nv"))
+    comprobar("sobre un programa con errores no se construye el grafo",
+              r.get("ok") is False and r.get("motivo"), str(r)[:160])
+
+
+# ---------------------------------------------------------------- 6. clones
 
 def prueba_clones():
-    print("\n[5] Deteccion de clones")
+    print("\n[6] Deteccion de clones")
 
     d = os.path.join(AQUI, "clones")
     archivos = [os.path.join(d, n) for n in
@@ -524,6 +617,7 @@ def main():
     prueba_diagnosticos()
     prueba_correcciones()
     prueba_completado()
+    prueba_bloques()
     prueba_clones()
 
     print("=" * 62)

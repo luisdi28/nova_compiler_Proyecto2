@@ -251,6 +251,8 @@ class Manejador(http.server.SimpleHTTPRequestHandler):
                 return self.responder_json(self.hacer_completar(peticion))
             if accion == "arreglar":
                 return self.responder_json(self.hacer_arreglar(peticion))
+            if accion == "bloques":
+                return self.responder_json(self.hacer_bloques(peticion))
             if accion == "clones":
                 return self.responder_json(self.hacer_clones(peticion))
             if accion == "compilar":
@@ -280,6 +282,11 @@ class Manejador(http.server.SimpleHTTPRequestHandler):
         nombre = p.get("nombre", "editor.nv")
         ruta = self.taller.escribir(nombre, p.get("contenido", ""))
         return self.nucleo.ejecutar(["arreglar", ruta, "--como", nombre])
+
+    def hacer_bloques(self, p):
+        nombre = p.get("nombre", "editor.nv")
+        ruta = self.taller.escribir(nombre, p.get("contenido", ""))
+        return self.nucleo.ejecutar(["bloques", ruta, "--como", nombre])
 
     def hacer_clones(self, p):
         """
