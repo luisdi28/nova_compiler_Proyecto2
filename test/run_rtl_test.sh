@@ -1,0 +1,76 @@
+#!/bin/sh
+set -eu
+
+NOVAC=${1:-./novac}
+SOURCE=${2:?source file required}
+EXPECTED=${3:?expected return value required}
+CPU=${4:-../src/cpu}
+OBJECT_SOURCE=${5:-}
+ROT_SECRET=${6:-}
+MAX_CYCLES=${7:-20000}
+EXPECTED_OUT=${8-}
+CHECK_EXPECTED_OUT=0
+[ "$#" -lt 8 ] || CHECK_EXPECTED_OUT=1
+# Banderas extra para el compilador, por ejemplo OPT=-O1. Sirven para correr la
+# misma bateria con y sin optimizacion: el valor de retorno que espera cada
+# prueba tiene que ser el mismo, que es la definicion de que optimizar no
+# cambia el programa.
+OPT=${OPT:-}
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/nova-rtl.XXXXXX")
+trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+
+if [ -n "$OPT" ]; then
+    echo "   (compilando con $OPT)"
+fi
+
+if [ -n "$OBJECT_SOURCE" ]; then
+    cp "$OBJECT_SOURCE" "$TMP/calculos.nv"
+    cp "$(dirname "$OBJECT_SOURCE")/basicas.nv" "$TMP/basicas.nv"
+    "$NOVAC" $OPT -c "$TMP/calculos.nv" -o "$TMP/calculos.nvo"
+    "$NOVAC" $OPT "$SOURCE" -I "$TMP" -o "$TMP/program.nvx"
+else
+    "$NOVAC" $OPT "$SOURCE" -o "$TMP/program.nvx"
+fi
+python3 ARQUITECTURA/tools/novac_image.py "$TMP/program.nvx" \
+    --imem "$TMP/imem.hex" --dmem "$TMP/dmem.hex"
+set -- -g2012 -Wall -Wno-timescale -I "$CPU"
+if [ -n "$ROT_SECRET" ]; then
+    set -- "$@" "-DCERBERO_ROT_SECRET=$ROT_SECRET"
+fi
+set -- "$@" "-DCERBERO_MAX_CYCLES=$MAX_CYCLES"
+iverilog "$@" \
+    -DCERBERO_IMEM_FILE="\"$TMP/imem.hex\"" \
+    -DCERBERO_DMEM_FILE="\"$TMP/dmem.hex\"" \
+    -s tb_nova_rtl -o "$TMP/sim.vvp" \
+    "$CPU"/*.sv test/tb_nova_rtl.sv
+if [ "$CHECK_EXPECTED_OUT" -eq 1 ]; then
+    if resultado=$(vvp -n "$TMP/sim.vvp" \
+        "+EXPECTED=$EXPECTED" "+EXPECTED_OUT=$EXPECTED_OUT" 2>&1); then
+        :
+    else
+        estado=$?
+        printf '%s\n' "$resultado"
+        exit "$estado"
+    fi
+else
+    if resultado=$(vvp -n "$TMP/sim.vvp" "+EXPECTED=$EXPECTED" 2>&1); then
+        :
+    else
+        estado=$?
+        printf '%s\n' "$resultado"
+        exit "$estado"
+    fi
+fi
+printf '%s\n' "$resultado"
+
+ciclos=$(printf '%s\n' "$resultado" |
+    awk '/ciclos RTL:/ { print $3; exit }')
+instrucciones=$(printf '%s\n' "$resultado" |
+    awk '/instrucciones RTL:/ { print $3; exit }')
+if [ -z "$ciclos" ] || [ -z "$instrucciones" ] || [ "$ciclos" -eq 0 ]; then
+    echo "Fallo: no se obtuvieron contadores RTL para $SOURCE" >&2
+    exit 1
+fi
+ipc=$(awk -v i="$instrucciones" -v c="$ciclos" \
+    'BEGIN { printf "%.3f", i / c }')
+printf '  IPC RTL: %s\n' "$ipc"

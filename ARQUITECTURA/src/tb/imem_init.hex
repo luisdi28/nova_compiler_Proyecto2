@@ -1,0 +1,6 @@
+// Archivo de carga de ejemplo para tb_imem.sv.
+// Un bundle de 128 bits por linea, 32 digitos hexadecimales.
+// Es el mismo formato que va a producir la herramienta de carga de archivos.
+00112233445566778899AABBCCDDEEFF
+0F1E2D3C4B5A69788796A5B4C3D2E1F0
+DEADBEEFCAFEBABE0123456789ABCDEF

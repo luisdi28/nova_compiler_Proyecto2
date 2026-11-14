@@ -1,0 +1,118 @@
+#ifndef CODEGEN_H
+#define CODEGEN_H
+
+/*
+ * Generacion de ensamblador VLIW para CERBERO (Fase 4b).
+ *
+ * Traduce la lista de tres direcciones a bundles de cinco slots:
+ *
+ *   <S0: ALU-0> | <S1: ALU-1> | <S2: LSU> | <S3: CRP> | <S4: BRU> ;
+ *
+ * Respeta las dos reglas temporales del ISA: tres bundles entre quien
+ * produce un valor y quien lo consume, y un bundle de delay slot despues de
+ * cada salto, que se ejecuta siempre.
+ *
+ * El emisor construye el grafo de dependencias de cada bloque, calendariza por
+ * camino critico y empaqueta ALU en S0/S1. Conserva las dependencias de
+ * registros, banderas, CRP y memoria; solo llena un delay slot con una
+ * operacion independiente segura. Etiquetas y saltos se remapean al final.
+ *
+ * Ojo con la numeracion: la fase 5 de la guia es el calculo de saltos y la
+ * resolucion de referencias, que si esta hecha, en construir_programa() y
+ * resolver_direcciones() de codegen.c. La fase 6 es la emision binaria.
+ */
+
+#include <stdio.h>
+#include <stdint.h>
+#include "tac.h"
+#include "symtab.h"
+
+/* Emite el ensamblador completo: cabecera, .data con los literales y el area
+ * de salida, .text con las funciones y el soporte de ejecucion que haga
+ * falta. Devuelve false si encontro algo que no puede traducir. */
+bool codegen_generate_vliw(TACList *tac, SymbolTable *st, FILE *out);
+
+/* Actualiza la tabla con el desplazamiento que usa el ensamblador despues
+ * de reservar el marco y la direccion IMEM de cada funcion, usando el
+ * programa ya relajado del generador. */
+bool codegen_update_symbol_layout(TACList *tac, SymbolTable *st);
+
+/*
+ * Tabla de etiquetas resueltas: los puntos de salto de condicionales y ciclos
+ * con la direccion que les toco.
+ *
+ * El calculo ya existia -- es lo que resuelve los saltos-- pero el resultado
+ * solo se veia como comentario dentro del .asm. La guia del curso pide en la
+ * Fase 3 "registrar puntos de salto (etiquetas) y sus direcciones en memoria
+ * para condicionales y ciclos", asi que la tabla tambien tiene que poder
+ * consultarse junto a la de simbolos, que es donde se la busca.
+ *
+ * La copia se toma dentro de codegen_update_symbol_layout(), antes de liberar
+ * las estructuras del generador, y sobrevive hasta la siguiente llamada.
+ */
+typedef struct {
+    const char *nombre;
+    uint32_t    direccion;   /* en bytes */
+    int         bundle;      /* indice de bundle en IMEM; -1 si es dato */
+    int         es_dato;     /* 1 si vive en DMEM, 0 si es codigo en IMEM */
+} CodegenEtiqueta;
+
+/* Deja en *out la tabla y devuelve cuantas entradas tiene. */
+int codegen_etiquetas(const CodegenEtiqueta **out);
+
+/*
+ * Tamano y densidad del programa que acaba de armarse.
+ *
+ * Son las metricas estaticas que predicen el tiempo de ejecucion: cada bundle
+ * es un ciclo de emision, y la ocupacion (slots con trabajo entre slots
+ * totales) dice si el VLIW se esta usando como VLIW o como un procesador
+ * escalar caro. Los numeros de verdad los dan los contadores del procesador al
+ * correr el binario; estos se pueden mirar sin simular.
+ *
+ * Se capturan junto con la tabla de etiquetas, antes de liberar las
+ * estructuras del generador. Devuelve 0 si todavia no se ha generado nada.
+ */
+typedef struct {
+    int bundles;         /* bundles emitidos (16 bytes cada uno) */
+    int slots_usados;    /* slots con una operacion de verdad */
+    int bundles_vacios;  /* bundles sin ninguna operacion */
+    int instrucciones_reordenadas;
+    int temporales_asignados_registro;
+    int renombradas;
+    int temporales_derramados;
+    int dependencias_war;
+    int dependencias_waw;
+    int nops_war;
+    int nops_waw;
+} CodegenEstadisticas;
+
+int codegen_estadisticas(CodegenEstadisticas *out);
+
+typedef struct {
+    bool soportado;
+    char motivo[128];
+    uint64_t ciclos;
+    uint64_t bundles_ejecutados;
+    uint64_t instrucciones;
+} CodegenSimulacion;
+
+bool codegen_simular_vliw(TACList *tac, CodegenSimulacion *out);
+
+/* Construye el calendario para medirlo sin emitir un archivo de salida. */
+bool codegen_measure_vliw(TACList *tac, CodegenEstadisticas *out);
+
+/* Muestra cada bundle con su dirección, slots de ensamblador y bytes emitidos. */
+bool codegen_print_packages(TACList *tac, SymbolTable *st, FILE *out);
+
+/* Muestra el calendario final y la dependencia que deja cada slot en NOP. */
+bool codegen_print_calendar(TACList *tac, SymbolTable *st, FILE *out);
+
+/* Muestra los intervalos, registros asignados y derrames de cada funcion. */
+bool codegen_print_allocation(TACList *tac, FILE *out);
+
+/* Emite el ejecutable binario: encabezado de 32 bytes, los bundles de 128
+ * bits y la seccion de datos. Se construye desde la misma lista de bundles
+ * que el ensamblador de texto, asi que las dos salidas no pueden divergir. */
+bool codegen_emitir_binario(TACList *tac, SymbolTable *st, FILE *out);
+
+#endif /* CODEGEN_H */
