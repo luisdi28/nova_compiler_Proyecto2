@@ -66,7 +66,12 @@ for source in test/ejecucion/*.nv test/ejemplos/*.nv \
         object_source=test/integracion/calculos.nv
     fi
 
-    for level in 0 1; do
+    # -O2 va incluido a proposito. Es el nivel que desenrolla lazos, reordena
+    # instrucciones y asigna registros con derrame: las tres transformaciones
+    # que pueden cambiar el resultado de un programa sin que falle la
+    # compilacion. Verificarlo solo sobre casos hechos a medida y dejar el
+    # corpus real en -O0 y -O1 es cubrir bien lo seguro y mal lo riesgoso.
+    for level in 0 1 2; do
         echo "=== $source -O$level: R6=$expected_r6, salida=[$expected_out] ==="
         if OPT="-O$level" sh test/run_rtl_test.sh "$NOVAC" "$source" \
                 "$expected_r6" "$CPU" "$object_source" "$rot_secret" \
@@ -81,7 +86,7 @@ for source in test/ejecucion/*.nv test/ejemplos/*.nv \
     done
 done
 
-echo "equivalencia RTL: $PASS correctas, $FAIL fallidas (-O0/-O1)"
+echo "equivalencia RTL: $PASS correctas, $FAIL fallidas (-O0/-O1/-O2)"
 if [ "$FAIL" -gt 0 ]; then
     printf 'casos fallidos:%s\n' "$FAILED_TESTS" >&2
 fi

@@ -1004,8 +1004,17 @@ def prueba_panel_optimizacion():
                   f"salida={por_direccion.get('0x3000')}/"
                   f"{por_direccion.get('0x3004')}")
     else:
-        comprobar("la falta del simulador se explica explicitamente",
-                  rtl.get("disponible") is False and bool(rtl.get("motivo")),
+        # Sin Icarus, compilar() no deja 'ciclos_rtl' en falso: cae al
+        # simulador en C y lo marca con origen='estimado'. Esa es la misma
+        # conducta que exige la comprobacion de 'respuesta_estimada' mas
+        # abajo, asi que pedir aqui disponible=False se contradecia con ella
+        # y la bateria no podia pasar en una maquina sin simulador.
+        #
+        # Lo que si hay que exigir es que el origen quede dicho: un numero de
+        # ciclos que no salio del RTL no se puede presentar como si lo fuera.
+        comprobar("sin Icarus los ciclos se marcan como estimados",
+                  rtl.get("disponible") is True and
+                  rtl.get("origen") == "estimado",
                   str(rtl)[:300])
         ejecucion = servidor.Nucleo(RAIZ).ejecutar_rtl(fuente, 2)
         comprobar("la ejecucion RTL explica que requiere Icarus",
