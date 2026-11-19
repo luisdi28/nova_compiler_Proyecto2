@@ -6,6 +6,18 @@ CPU=${2:-ARQUITECTURA/src/cpu}
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
+# Iteracion 5. Con METRICAS_DIR apuntando a un directorio, cada corrida deja
+# ahi su volcado de contadores, uno por programa y nivel.
+#
+# Se recogen en esta bateria, y no en un guion aparte, a proposito: es la unica
+# que corre el corpus completo en los tres niveles comprobando que el resultado
+# no cambia. Medir en el mismo paso que se verifica garantiza que la tabla de
+# rendimiento y la prueba de equivalencia hablan de los mismos binarios.
+METRICAS_DIR=${METRICAS_DIR:-}
+if [ -n "$METRICAS_DIR" ]; then
+    mkdir -p "$METRICAS_DIR"
+fi
+
 if [ ! -x "$NOVAC" ]; then
     echo "no existe el compilador ejecutable: $NOVAC" >&2
     exit 2
@@ -73,6 +85,14 @@ for source in test/ejecucion/*.nv test/ejemplos/*.nv \
     # corpus real en -O0 y -O1 es cubrir bien lo seguro y mal lo riesgoso.
     for level in 0 1 2; do
         echo "=== $source -O$level: R6=$expected_r6, salida=[$expected_out] ==="
+        METRICAS=
+        if [ -n "$METRICAS_DIR" ]; then
+            # El nombre del programa lleva la ruta aplanada para que dos
+            # fuentes con el mismo basename en carpetas distintas no se pisen.
+            plano=$(printf '%s' "${source%.nv}" | tr '/' '_')
+            METRICAS="$METRICAS_DIR/${plano}.O$level.txt"
+        fi
+        export METRICAS
         if OPT="-O$level" sh test/run_rtl_test.sh "$NOVAC" "$source" \
                 "$expected_r6" "$CPU" "$object_source" "$rot_secret" \
                 "$max_cycles" "$expected_out"; then

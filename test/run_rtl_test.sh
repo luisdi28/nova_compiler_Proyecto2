@@ -16,6 +16,9 @@ CHECK_EXPECTED_OUT=0
 # prueba tiene que ser el mismo, que es la definicion de que optimizar no
 # cambia el programa.
 OPT=${OPT:-}
+# Ruta donde dejar el volcado de contadores de rendimiento (Iteracion 5). Vacia
+# por omision: las baterias existentes no cambian de salida.
+METRICAS=${METRICAS:-}
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/nova-rtl.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
@@ -43,23 +46,19 @@ iverilog "$@" \
     -DCERBERO_DMEM_FILE="\"$TMP/dmem.hex\"" \
     -s tb_nova_rtl -o "$TMP/sim.vvp" \
     "$CPU"/*.sv test/tb_nova_rtl.sv
+set -- "+EXPECTED=$EXPECTED"
 if [ "$CHECK_EXPECTED_OUT" -eq 1 ]; then
-    if resultado=$(vvp -n "$TMP/sim.vvp" \
-        "+EXPECTED=$EXPECTED" "+EXPECTED_OUT=$EXPECTED_OUT" 2>&1); then
-        :
-    else
-        estado=$?
-        printf '%s\n' "$resultado"
-        exit "$estado"
-    fi
+    set -- "$@" "+EXPECTED_OUT=$EXPECTED_OUT"
+fi
+if [ -n "$METRICAS" ]; then
+    set -- "$@" "+METRICAS=$METRICAS"
+fi
+if resultado=$(vvp -n "$TMP/sim.vvp" "$@" 2>&1); then
+    :
 else
-    if resultado=$(vvp -n "$TMP/sim.vvp" "+EXPECTED=$EXPECTED" 2>&1); then
-        :
-    else
-        estado=$?
-        printf '%s\n' "$resultado"
-        exit "$estado"
-    fi
+    estado=$?
+    printf '%s\n' "$resultado"
+    exit "$estado"
 fi
 printf '%s\n' "$resultado"
 

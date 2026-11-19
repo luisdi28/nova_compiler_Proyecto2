@@ -145,12 +145,56 @@ module top #(
     output logic [31:0]                   perf_saltos,
     output logic [31:0]                   perf_delay_vacios,
     output logic [31:0]                   perf_stall,
+
+// ---- Metricas de la cache L1-D (Iteracion 3 y 4) ------------------------
+    output logic [31:0]                   perf_l1_load_hit,
+    output logic [31:0]                   perf_l1_load_miss,
+    output logic [31:0]                   perf_l1_store_hit,
+    output logic [31:0]                   perf_l1_store_miss,
+    output logic [31:0]                   perf_stall_miss,
+    output logic [31:0]                   perf_stall_wb,
+    output logic [31:0]                   perf_stall_raw,
+    output logic [31:0]                   perf_stall_evict, // <--- NUEVO [L2-04]
+    output logic [31:0]                   perf_inv_ejecutadas, // Iteracion 5, 5.2
+    output logic [31:0]                   perf_mem_accesos,    // Iteracion 5, 5.3
+    output logic [31:0]                   perf_mem_ciclos,     // Iteracion 5, 5.3
+    // ---- Métricas de la cache L2 (Iteración 4) [ISSUE L2-05] --------------
+    output logic [31:0]                   perf_l2_load_hit,
+    output logic [31:0]                   perf_l2_load_miss,
+    output logic [31:0]                   perf_l2_store_hit,
+    output logic [31:0]                   perf_l2_store_miss,
+
+    // El sistema termino: el procesador se detuvo, no queda ningun bundle en
+    // vuelo y toda escritura llego a la memoria principal.
+    //
+    // Los testbenches la usan para saber cuando pueden revisar la memoria.
+    // Hace falta porque desde la Iteracion 3 un store no llega a memoria
+    // cuando se ejecuta: pasa por la cache, por el write buffer y por el
+    // eviction buffer, y el ultimo tramo cuesta T_mem por linea.
+    //
+    // Incluye el estado del pipeline, y no solo el de los buffers, porque
+    // mirar los buffers solos se equivoca en los dos extremos: justo despues
+    // del HALT estan vacios aunque el store que falta todavia venga bajando
+    // por las etapas, y un bundle detenido en un fallo de cache puede quedarse
+    // ahi 54 ciclos, mucho mas de lo que cualquier espera fija supondria.
+    output logic                          mem_drenada,
+
     output logic                          perf_desbordado
 );
 
   // ===========================================================================
   // ETAPA IF
   // ===========================================================================
+
+  // ---------------------------------------------------------------------------
+  // Control de la jerarquia de memoria
+  //
+  // Se declaran aqui, antes que nada, porque cache_stall lo consumen las tres
+  // fronteras del pipeline y ex_commit lo consume la etapa EX, todos mas
+  // arriba que el bloque donde la jerarquia se instancia.
+  // ---------------------------------------------------------------------------
+  logic cache_stall;   // la cache no puede resolver el acceso en este ciclo
+  logic ex_commit;     // el bundle de EX entrega resultados en este ciclo
 
   logic             if_valid;
   logic [`XLEN-1:0] if_pc;
@@ -164,6 +208,7 @@ module top #(
       .taken  (id_taken),
       .target (id_target),
       .halt   (id_halt),
+      .stall  (cache_stall),
       .pc     (if_pc),
       .valid  (if_valid),
       .halted (halted)
@@ -176,6 +221,7 @@ module top #(
       .INIT_FILE   (`CERBERO_IMEM_FILE)
   ) u_imem (
       .clk    (clk),
+      .stall  (cache_stall),
       .addr   (if_pc),
       .bundle (id_bundle)
   );
@@ -187,6 +233,7 @@ module top #(
   reg_if_id u_if_id (
       .clk       (clk),
       .rst_n     (rst_n),
+      .stall     (cache_stall),
       .valid_in  (if_valid),
       .pc_in     (if_pc),
       .valid_out (id_valid),
@@ -312,6 +359,7 @@ module top #(
   reg_id_ex u_id_ex (
       .clk          (clk),
       .rst_n        (rst_n),
+      .stall        (cache_stall),
       .valid_in     (id_valid),
       .pc_in        (id_pc),
       .s0_inst_in   (id_s0),
@@ -475,7 +523,7 @@ module top #(
   ) u_key_vault (
       .clk       (clk),
       .rst_n     (rst_n),
-      .valid     (ex_valid),
+      .valid     (ex_commit),
       .slot      (ex_s3),
       .rs_data   (ex_rval[`RP_S3_A]),
       .pc        (ex_pc),
@@ -542,24 +590,276 @@ module top #(
   assign s3_otros_fallan = a0_illop || a1_illop || lsu_fault ||
                            sa_fault || s3_es_reservado || ex_s4_fault;
 
-  // ---------------------------------------------------------------------------
-  // Memoria de datos. La direccion, el dato y la mascara se presentan
-  // combinacionalmente durante EX; el registro de salida es la frontera EX/MEM.
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
+  // JERARQUIA DE MEMORIA DE DATOS  (Proyecto II, Iteracion 3 y 4)
+  //
+  // La dmem ideal del Proyecto I desaparecio. En su lugar:
+  //
+  //     LSU  ->  L1-D  ->  write buffer  ->  l2_arbiter  ->  L2  ->  mem_system
+  //                 |                                                   ^
+  //                 +--- relleno de linea ------------------------------+
+  //
+  // La direccion sigue presentandose combinacionalmente durante EX y el dato
+  // sigue llegando a MEM por un registro de salida, exactamente como con la
+  // dmem. Lo unico nuevo hacia el pipeline es 'cache_stall'.
+  //
+  // El write buffer es una instancia del MISMO eviction_buffer.sv que ya vive
+  // dentro de mem_system. No es reciclaje por comodidad: sus entradas llevan
+  // una linea con mascara de bytes, que es justo lo que produce un store en
+  // write-through, y su logica de fusion y de conflicto RAW ya esta verificada.
+  // El enunciado exige los dos buffers (seccion 3.4) y los dos son este modulo
+  // con distinto tamano.
+  //
+  // En la Iteracion 4 la cache L2 se intercala entre el write buffer y
+  // mem_system, sin que ninguno de los dos extremos cambie.
+  // ===========================================================================
 
   logic [`XLEN-1:0] mem_rdata;
 
-  dmem #(
-      .NUM_WORDS (NUM_WORDS),
-      .INIT_FILE (`CERBERO_DMEM_FILE)
-  ) u_dmem (
-      .clk         (clk),
-      .addr        (lsu_eff_addr),
-      .we          (lsu_mem_we),
-      .byte_enable (lsu_be),
-      .wdata       (lsu_wdata),
-      .rdata       (mem_rdata)
+  // ---- Cache -> write buffer -------------------------------------------------
+  logic                    wb_push;
+  logic [`MEM_LIDX_W-1:0]  wb_linea;
+  logic [`LINE_W-1:0]      wb_datos;
+  logic [`LINE_MASK_W-1:0] wb_mascara;
+  logic                    wb_lleno;
+  logic [`MEM_LIDX_W-1:0]  wb_consulta;
+  logic                    wb_conflicto;
+
+  // ---- Cache L1 -> Arbitro L2 (relleno) --------------------------------------
+  logic                    l1_mem_req;
+  logic [`MEM_LIDX_W-1:0]  l1_mem_linea;
+  logic                    l1_mem_listo;
+  logic [`LINE_W-1:0]      l1_mem_datos;
+
+  // ---- Invalidación Hacia Atrás (L2 -> L1) [ISSUE L2-03] ---------------------
+  logic                    l2_inv_req;
+  logic [`MEM_LIDX_W-1:0]  l2_inv_linea;
+
+  // ---- Eventos para los contadores -------------------------------------------
+  logic ev_load_hit, ev_load_miss, ev_store_hit, ev_store_miss;
+  logic ev_stall_miss, ev_stall_wb, ev_stall_raw;
+  logic ev_inv_ejecutada;   // Iteracion 5, seccion 5.2
+
+  // Un acceso de verdad a memoria. Las dos senales ya vienen filtradas por la
+  // LSU: solo se encienden con el bundle valido, con un opcode de acceso y sin
+  // falla de direccion, asi que una carga mal alineada no llega a la cache.
+  logic cache_req;
+  assign cache_req = lsu_rd_we || lsu_mem_we;
+
+  // 1. Instancia de la Caché L1-D
+  l1_dcache u_l1d (
+      .clk           (clk),
+      .rst_n         (rst_n),
+      .req           (cache_req),
+      .addr          (lsu_eff_addr),
+      .we            (lsu_mem_we),
+      .be            (lsu_be),
+      .wdata         (lsu_wdata),
+      .rdata         (mem_rdata),
+      .stall         (cache_stall),
+      .wb_push       (wb_push),
+      .wb_linea      (wb_linea),
+      .wb_datos      (wb_datos),
+      .wb_mascara    (wb_mascara),
+      .wb_lleno      (wb_lleno),
+      .wb_consulta   (wb_consulta),
+      .wb_conflicto  (wb_conflicto),
+      .mem_req       (l1_mem_req),
+      .mem_linea     (l1_mem_linea),
+      .mem_listo     (l1_mem_listo),
+      .mem_datos     (l1_mem_datos),
+      .inv_req       (l2_inv_req),     // <--- CONEXIÓN ISSUE L2-03
+      .inv_linea     (l2_inv_linea),   // <--- CONEXIÓN ISSUE L2-03
+      .ev_load_hit   (ev_load_hit),
+      .ev_load_miss  (ev_load_miss),
+      .ev_store_hit  (ev_store_hit),
+      .ev_store_miss (ev_store_miss),
+      .ev_stall_miss (ev_stall_miss),
+      .ev_stall_wb   (ev_stall_wb),
+      .ev_stall_raw  (ev_stall_raw),
+      .ev_inv_ejecutada (ev_inv_ejecutada)
   );
+
+// ---- Write buffer L1-D -> L2 -----------------------------------------------
+
+  logic                    wb_head_valido;
+  logic [`MEM_LIDX_W-1:0]  wb_head_linea;
+  logic [`LINE_W-1:0]      wb_head_datos;
+  logic [`LINE_MASK_W-1:0] wb_head_mascara;
+  logic                    wb_head_ack;
+  logic                    wb_head_ocupada;
+  logic                    wb_vacio;
+  logic [`EVICT_IDX_W:0]   wb_ocupadas;
+
+  // 2. Instancia del Write Buffer
+  eviction_buffer #(.ENTRIES (`WB_ENTRIES)) u_write_buffer (
+      .clk            (clk),
+      .rst_n          (rst_n),
+      .push           (wb_push),
+      .push_linea     (wb_linea),
+      .push_datos     (wb_datos),
+      .push_mascara   (wb_mascara),
+      .head_valido    (wb_head_valido),
+      .head_linea     (wb_head_linea),
+      .head_datos     (wb_head_datos),
+      .head_mascara   (wb_head_mascara),
+      .head_ack       (wb_head_ack),
+      .head_ocupada   (wb_head_ocupada),
+      .consulta_linea (wb_consulta),
+      .conflicto      (wb_conflicto),
+      .lleno          (wb_lleno),
+      .vacio          (wb_vacio),
+      .ocupadas       (wb_ocupadas)
+  );
+
+  // ---- Arbitro L2 ------------------------------------------------------------
+  logic                     l2_req_lectura;
+  logic                     l2_req_escritura;
+  logic [`MEM_LIDX_W-1:0]   l2_req_linea;
+  logic [`LINE_W-1:0]       l2_req_wdata;
+  logic [`LINE_MASK_W-1:0]  l2_req_wmask;
+  logic [`LINE_W-1:0]       l2_rdata;
+  logic                     l2_listo;
+
+  // 3. Instancia del Árbitro L2
+  l2_arbiter u_l2_arbiter (
+      .clk              (clk),
+      .rst_n            (rst_n),
+      .l1_req           (l1_mem_req),
+      .l1_linea         (l1_mem_linea),
+      .l1_listo         (l1_mem_listo),
+      .l1_rdata         (l1_mem_datos),
+      .wb_req           (wb_head_valido),
+      .wb_linea         (wb_head_linea),
+      .wb_datos         (wb_head_datos),
+      .wb_mascara       (wb_head_mascara),
+      .wb_ack           (wb_head_ack),
+      .wb_drenando      (wb_head_ocupada),
+      .l2_req_lectura   (l2_req_lectura),
+      .l2_req_escritura (l2_req_escritura),
+      .l2_req_linea     (l2_req_linea),
+      .l2_req_wdata     (l2_req_wdata),
+      .l2_req_wmask     (l2_req_wmask),
+      .l2_rdata         (l2_rdata),
+      .l2_listo         (l2_listo)
+  );
+
+  // ---- Caché L2 Unificada ----------------------------------------------------
+  logic                     l2_mem_req;
+  logic [`MEM_LIDX_W-1:0]   l2_mem_linea;
+  logic                     l2_ev_push;
+  logic [`MEM_LIDX_W-1:0]   l2_ev_linea;
+  logic [`LINE_W-1:0]       l2_ev_datos;
+  logic [`LINE_MASK_W-1:0]  l2_ev_mascara;
+  logic                     mem_sys_listo;
+  logic [`LINE_W-1:0]       mem_sys_linea_datos;
+  logic                     mem_ev_lleno;
+  // ---- Vaciado de la L2 al terminar el programa -----------------------------
+  // La L2 es write-back, asi que al llegar a HALT puede quedar dato valido que
+  // nunca bajo a memoria principal. Se le pide vaciarse cuando el procesador ya
+  // se detuvo y no queda nada en vuelo aguas arriba; mientras no termine,
+  // mem_drenada no se levanta y ningun testbench compara la memoria antes de
+  // tiempo.
+  logic l2_vaciar, l2_tiene_sucias;
+
+  assign l2_vaciar = halted && !id_valid && !ex_valid && !mem_valid
+                  && !cache_stall && wb_vacio;
+
+  logic                     l2_ev_stall; // <--- NUEVO [L2-04]: Cable para llevar el evento al contador
+  logic l2_ev_load_hit, l2_ev_load_miss, l2_ev_store_hit, l2_ev_store_miss; // <--- NUEVO [L2-05]
+
+  // 4. Instancia de la Caché L2
+  l2_cache #(
+      .WAYS(`L2_WAYS),
+      .SETS(`L2_SETS)
+  ) u_l2_cache (
+      .clk              (clk),
+      .rst_n            (rst_n),
+      .req_lectura      (l2_req_lectura),
+      .req_escritura    (l2_req_escritura),
+      .req_linea        (l2_req_linea),
+      .req_wdata        (l2_req_wdata),
+      .req_wmask        (l2_req_wmask),
+      .rdata            (l2_rdata),
+      .listo            (l2_listo),
+      .l2_inv_req       (l2_inv_req),    // <--- CONEXIÓN ISSUE L2-03
+      .l2_inv_linea     (l2_inv_linea),  // <--- CONEXIÓN ISSUE L2-03
+      .vaciar           (l2_vaciar),
+      .tiene_sucias     (l2_tiene_sucias),
+      .mem_req          (l2_mem_req),
+      .mem_linea        (l2_mem_linea),
+      .mem_listo        (mem_sys_listo),
+      .mem_datos        (mem_sys_linea_datos),
+      .ev_push          (l2_ev_push),
+      .ev_linea         (l2_ev_linea),
+      .ev_datos         (l2_ev_datos),
+      .ev_mascara       (l2_ev_mascara),
+      .ev_lleno         (mem_ev_lleno),
+      .ev_stall_evict   (l2_ev_stall), // <--- NUEVO [L2-04]: Conexión del evento
+      .ev_l2_load_hit   (l2_ev_load_hit),   // <--- NUEVO [L2-05]
+      .ev_l2_load_miss  (l2_ev_load_miss),  // <--- NUEVO [L2-05]
+      .ev_l2_store_hit  (l2_ev_store_hit),  // <--- NUEVO [L2-05]
+      .ev_l2_store_miss (l2_ev_store_miss)  // <--- NUEVO [L2-05]
+  );
+
+  // ---- Memoria principal ------------------------------------------------------
+
+  logic mem_sys_clk_obs, mem_sys_ocupado, mem_sys_ev_vacio, mem_sys_raw;
+  logic [`EVICT_IDX_W:0] mem_sys_ev_ocupadas;
+  logic mem_sys_inicia_rd, mem_sys_inicia_wr;
+
+  // 5. Instancia del Subsistema de Memoria Principal (Envoltorio)
+
+  // El tamano sale del parametro NUM_WORDS del procesador, no de la constante
+  // MEM_WORDS. Hasta la Iteracion 2 ese parametro dimensionaba la dmem; al
+  // reemplazarla por la jerarquia hay que seguir respetandolo, porque varios
+  // testbenches lo bajan a 64 palabras para que la simulacion sea liviana.
+  // Fijarlo en 16384 dejaba el parametro muerto y hacia que $readmemh avisara
+  // que el archivo de datos no llenaba el arreglo.
+  mem_system #(.NUM_WORDS (NUM_WORDS)) u_mem_sys (
+      .clk            (clk),
+      .rst_n          (rst_n),
+      .req            (l2_mem_req),
+      .req_linea      (l2_mem_linea),
+      .listo          (mem_sys_listo),
+      .linea_datos    (mem_sys_linea_datos),
+      .ev_push        (l2_ev_push),
+      .ev_linea       (l2_ev_linea),
+      .ev_datos       (l2_ev_datos),
+      .ev_mascara     (l2_ev_mascara),
+      .ev_lleno       (mem_ev_lleno),
+      .mem_clk        (mem_sys_clk_obs),
+      .ocupado        (mem_sys_ocupado),
+      .ev_vacio       (mem_sys_ev_vacio),
+      .ev_ocupadas    (mem_sys_ev_ocupadas),
+      .raw_conflicto  (mem_sys_raw),
+      .inicia_lectura (mem_sys_inicia_rd),
+      .inicia_drenado (mem_sys_inicia_wr)
+  );
+  
+  // ---------------------------------------------------------------------------
+  // El bundle de EX completa, o no
+  //
+  // Mientras la cache pide espera, el bundle de EX se queda donde esta y se
+  // vuelve a evaluar ciclo tras ciclo. Todo lo que tenga EFECTO tiene que
+  // mirar esta senal y no ex_valid, porque si no el mismo bundle escribiria el
+  // banco, la boveda y el PSW una vez por cada ciclo de espera.
+  //
+  // Las unidades puramente combinacionales (ALU, LSU, cripto) no necesitan la
+  // distincion: recalcular lo mismo no cambia nada, y la LSU ADEMAS tiene que
+  // seguir presentando su peticion a la cache durante toda la espera.
+  // ---------------------------------------------------------------------------
+
+  assign ex_commit = ex_valid && !cache_stall;
+
+  assign mem_drenada = halted                        // la busqueda se detuvo
+                    && !id_valid && !ex_valid        // no queda bundle en vuelo
+                    && !mem_valid
+                    && !cache_stall                  // ni un acceso esperando
+                    && wb_vacio                      // el write buffer se vacio
+                    && !l2_tiene_sucias              // la L2 ya no retiene nada
+                    && mem_sys_ev_vacio              // el eviction buffer tambien
+                    && !mem_sys_ocupado;             // y el bus no esta en uso
 
   // ---------------------------------------------------------------------------
   // Los siete puertos de escritura, tal como salen de EX
@@ -610,6 +910,18 @@ module top #(
     ex_wen [`WP_S4_LINK] = ex_link_we;
     ex_widx[`WP_S4_LINK] = ex_link_idx;
     ex_wval[`WP_S4_LINK] = ex_link_val;
+
+    // Mientras la cache pide espera, el bundle de EX no entrega nada. Apagar
+    // las habilitaciones aqui, en un solo lugar, es lo que convierte la
+    // frontera EX/MEM en una burbuja durante el stall: lo que ya estaba en MEM
+    // termina su escritura una vez y nada nuevo entra detras.
+    //
+    // Hace falta ademas de poner valid_in en cero, porque los puertos de
+    // escritura cruzan la frontera por su cuenta y la etapa WB los mira
+    // directamente: un bundle congelado 53 ciclos escribiria su resultado 53
+    // veces en el banco. Con un valor idempotente eso no se notaria, pero un
+    // .INC vuelve a sumar el incremento en cada repeticion.
+    if (!ex_commit) ex_wen = '0;
   end
 
   // Las cinco fallas, en orden S0..S4
@@ -634,6 +946,14 @@ module top #(
 
     ex_fault[4] = ex_s4_fault;
     ex_cause[4] = ex_s4_cause;
+
+    // Igual que las escrituras: una falla de un bundle detenido se registraria
+    // una vez por ciclo de espera, y el registro de fallas del PSW es
+    // acumulativo.
+    if (!ex_commit) begin
+      ex_fault = 5'd0;
+      ex_cause = '0;
+    end
   end
 
   logic [1:0] ex_addr_lo;
@@ -662,7 +982,7 @@ module top #(
   reg_ex_mem u_ex_mem (
       .clk              (clk),
       .rst_n            (rst_n),
-      .valid_in         (ex_valid),
+      .valid_in         (ex_commit),
       .s2_inst_in       (ex_s2),
       .addr_lo_in       (ex_addr_lo),
       .write_enable_in  (ex_wen),
@@ -760,7 +1080,22 @@ module top #(
       .id_bundle      (id_bundle),
       .id_taken       (id_taken),
       .halted         (halted),
-      .stall          (1'b0),
+      .stall          (cache_stall),
+      .ev_load_hit    (ev_load_hit),
+      .ev_load_miss   (ev_load_miss),
+      .ev_store_hit   (ev_store_hit),
+      .ev_store_miss  (ev_store_miss),
+      .ev_stall_miss  (ev_stall_miss),
+      .ev_stall_wb    (ev_stall_wb),
+      .ev_stall_raw   (ev_stall_raw),
+      .ev_inv_ejecutada (ev_inv_ejecutada),
+      .ev_mem_acceso    (mem_sys_inicia_rd || mem_sys_inicia_wr),
+      .ev_mem_ocupado   (mem_sys_ocupado),
+      .ev_stall_evict (l2_ev_stall),      // <--- NUEVO [L2-04]: Entrada del evento
+      .ev_l2_load_hit   (l2_ev_load_hit),   // <--- NUEVO [L2-05]
+      .ev_l2_load_miss  (l2_ev_load_miss),  // <--- NUEVO [L2-05]
+      .ev_l2_store_hit  (l2_ev_store_hit),  // <--- NUEVO [L2-05]
+      .ev_l2_store_miss (l2_ev_store_miss), // <--- NUEVO [L2-05]
       .ciclos         (perf_ciclos),
       .bundles        (perf_bundles),
       .instrucciones  (perf_instrucciones),
@@ -771,6 +1106,21 @@ module top #(
       .saltos_tomados (perf_saltos),
       .delay_vacios   (perf_delay_vacios),
       .ciclos_stall   (perf_stall),
+      .l1_load_hit    (perf_l1_load_hit),
+      .l1_load_miss   (perf_l1_load_miss),
+      .l1_store_hit   (perf_l1_store_hit),
+      .l1_store_miss  (perf_l1_store_miss),
+      .stall_por_miss (perf_stall_miss),
+      .stall_por_wb   (perf_stall_wb),
+      .stall_por_raw  (perf_stall_raw),
+      .stall_por_evict(perf_stall_evict),
+      .inv_ejecutadas (perf_inv_ejecutadas),
+      .mem_accesos    (perf_mem_accesos),
+      .mem_ciclos     (perf_mem_ciclos), // <--- NUEVO [L2-04]: Salida hacia el testbench
+      .l2_load_hit    (perf_l2_load_hit),   // <--- NUEVO [L2-05]
+      .l2_load_miss   (perf_l2_load_miss),  // <--- NUEVO [L2-05]
+      .l2_store_hit   (perf_l2_store_hit),  // <--- NUEVO [L2-05]
+      .l2_store_miss  (perf_l2_store_miss), // <--- NUEVO [L2-05]
       .desbordado     (perf_desbordado)
   );
 

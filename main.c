@@ -1165,8 +1165,18 @@ int main(int argc, char **argv) {
             }
             if (tiene_ciclos_antes || tiene_ciclos_despues) {
                 printf("=== Simulacion de ciclos (estimada por C) ===\n");
+                /* La etiqueta decia "ANTES (-O0)" y era falsa: 'tac_antes' es
+                   el TAC previo a la fase 6, pero pasa por el MISMO backend
+                   que la corrida actual, con su asignacion de registros y su
+                   calendarizacion. No es una compilacion en -O0 y no da sus
+                   numeros: para unroll_constante.nv esta linea decia 237
+                   ciclos y compilar de verdad en -O0 da 259.
+                   Lo que aisla es el efecto de la fase 6 sola, que es util,
+                   pero hay que llamarlo por su nombre. Para comparar contra
+                   -O0 de verdad hay que compilar en cada nivel por separado. */
                 if (tiene_ciclos_antes)
-                    imprimir_resumen_ciclos(stdout, "ANTES (-O0)", &ciclos_antes);
+                    imprimir_resumen_ciclos(stdout, "ANTES (sin fase 6, mismo backend)",
+                                            &ciclos_antes);
                 if (tiene_ciclos_despues) {
                     char etiqueta[32];
                     snprintf(etiqueta, sizeof(etiqueta), "DESPUES (-O%d)",

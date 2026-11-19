@@ -50,6 +50,28 @@ module tb_perf_counters;
   logic [31:0] bundles_vacios, saltos_tomados, delay_vacios, ciclos_stall;
   logic        desbordado;
 
+  // Eventos de la cache L1: este arnes no los usa (ver la nota en la instancia)
+  logic [6:0]  ev_l1 = 7'd0;
+
+  // Eventos de la cache L2 y del stall por eviction buffer lleno. Hasta la
+  // Iteracion 4 quedaban flotando aqui, asi que los cinco contadores que pide
+  // el enunciado no los probaba nadie. Los casos [L2] del final los mueven.
+  logic ev_stall_evict   = 1'b0;
+  logic ev_l2_load_hit   = 1'b0;
+  logic ev_l2_load_miss  = 1'b0;
+  logic ev_l2_store_hit  = 1'b0;
+  logic ev_l2_store_miss = 1'b0;
+
+  // Iteracion 5: invalidaciones hacia atras y memoria principal
+  logic ev_inv_ejecutada = 1'b0;
+  logic ev_mem_acceso    = 1'b0;
+  logic ev_mem_ocupado   = 1'b0;
+  logic [31:0] inv_ejecutadas, mem_accesos, mem_ciclos;
+
+  // Salidas de los contadores L2 de la instancia ancha
+  logic [31:0] l2_load_hit, l2_load_miss, l2_store_hit, l2_store_miss;
+  logic [31:0] stall_por_evict;
+
   perf_counters dut (
       .clk            (clk),
       .rst_n          (rst_n),
@@ -58,6 +80,25 @@ module tb_perf_counters;
       .id_taken       (id_taken),
       .halted         (halted),
       .stall          (stall),
+      // Los eventos de cache no los ejercita este arnes: se verifican en
+      // tb_l1_dcache.sv, donde hay una cache de verdad que los produce. Aqui
+      // van en cero para que las cuentas del procesador queden aisladas.
+      .ev_load_hit    (ev_l1[0]),
+      .ev_load_miss   (ev_l1[1]),
+      .ev_store_hit   (ev_l1[2]),
+      .ev_store_miss  (ev_l1[3]),
+      .ev_stall_miss  (ev_l1[4]),
+      .ev_stall_wb    (ev_l1[5]),
+      .ev_stall_raw   (ev_l1[6]),
+      .ev_stall_evict   (ev_stall_evict),
+      .ev_l2_load_hit   (ev_l2_load_hit),
+      .ev_l2_load_miss  (ev_l2_load_miss),
+      .ev_l2_store_hit  (ev_l2_store_hit),
+      .ev_l2_store_miss (ev_l2_store_miss),
+      .ev_inv_ejecutada (ev_inv_ejecutada),
+      .ev_mem_acceso    (ev_mem_acceso),
+      .ev_mem_ocupado   (ev_mem_ocupado),
+
       .ciclos         (ciclos),
       .bundles        (bundles),
       .instrucciones  (instrucciones),
@@ -68,6 +109,21 @@ module tb_perf_counters;
       .saltos_tomados (saltos_tomados),
       .delay_vacios   (delay_vacios),
       .ciclos_stall   (ciclos_stall),
+      .l1_load_hit    (),
+      .l1_load_miss   (),
+      .l1_store_hit   (),
+      .l1_store_miss  (),
+      .stall_por_miss (),
+      .stall_por_wb   (),
+      .stall_por_raw  (),
+      .l2_load_hit    (l2_load_hit),
+      .l2_load_miss   (l2_load_miss),
+      .l2_store_hit   (l2_store_hit),
+      .l2_store_miss  (l2_store_miss),
+      .stall_por_evict(stall_por_evict),
+      .inv_ejecutadas (inv_ejecutadas),
+      .mem_accesos    (mem_accesos),
+      .mem_ciclos     (mem_ciclos),
       .desbordado     (desbordado)
   );
 
@@ -90,6 +146,25 @@ module tb_perf_counters;
       .id_taken       (id_taken),
       .halted         (halted),
       .stall          (stall),
+      // Los eventos de cache no los ejercita este arnes: se verifican en
+      // tb_l1_dcache.sv, donde hay una cache de verdad que los produce. Aqui
+      // van en cero para que las cuentas del procesador queden aisladas.
+      .ev_load_hit    (ev_l1[0]),
+      .ev_load_miss   (ev_l1[1]),
+      .ev_store_hit   (ev_l1[2]),
+      .ev_store_miss  (ev_l1[3]),
+      .ev_stall_miss  (ev_l1[4]),
+      .ev_stall_wb    (ev_l1[5]),
+      .ev_stall_raw   (ev_l1[6]),
+      .ev_stall_evict   (ev_stall_evict),
+      .ev_l2_load_hit   (ev_l2_load_hit),
+      .ev_l2_load_miss  (ev_l2_load_miss),
+      .ev_l2_store_hit  (ev_l2_store_hit),
+      .ev_l2_store_miss (ev_l2_store_miss),
+      .ev_inv_ejecutada (ev_inv_ejecutada),
+      .ev_mem_acceso    (ev_mem_acceso),
+      .ev_mem_ocupado   (ev_mem_ocupado),
+
       .ciclos         (ciclos_chico),
       .bundles        (bundles_chico),
       .instrucciones  (instr_chico),
@@ -100,6 +175,13 @@ module tb_perf_counters;
       .saltos_tomados (saltos_chico),
       .delay_vacios   (delay_chico),
       .ciclos_stall   (stall_chico),
+      .l1_load_hit    (),
+      .l1_load_miss   (),
+      .l1_store_hit   (),
+      .l1_store_miss  (),
+      .stall_por_miss (),
+      .stall_por_wb   (),
+      .stall_por_raw  (),
       .desbordado     (desbordado_chico)
   );
 
@@ -435,6 +517,119 @@ module tb_perf_counters;
     check("el contador de 32 bits no desbordo", ciclos,
           {24'd0, TOPE_ANGOSTO} + 3);
     check1("y su bit sigue apagado",            desbordado, 1'b0);
+
+    // -------------------------------------------------------------------------
+    $display("");
+    $display("[L2] los cinco contadores de la cache L2");
+    // -------------------------------------------------------------------------
+    // Son los que pide el enunciado en la Iteracion 4. Hasta ahora sus entradas
+    // quedaban flotando en este arnes, asi que nadie comprobaba que contaran.
+    //
+    // Se pulsan por separado para fijar dos cosas a la vez: que cada evento
+    // sume en SU contador, y que no sume en ninguno de los otros cuatro.
+
+    reiniciar();
+
+    // Tres pulsos de acierto de lectura
+    repeat (3) begin
+      ev_l2_load_hit = 1'b1;
+      @(posedge clk); #1;
+      ev_l2_load_hit = 1'b0;
+      @(posedge clk); #1;
+    end
+    check("l2_load_hit conto los tres pulsos", l2_load_hit, 3);
+    check("y no toco l2_load_miss",  l2_load_miss,  0);
+    check("ni l2_store_hit",         l2_store_hit,  0);
+    check("ni l2_store_miss",        l2_store_miss, 0);
+    check("ni stall_por_evict",      stall_por_evict, 0);
+
+    // Un pulso de fallo de lectura
+    ev_l2_load_miss = 1'b1;
+    @(posedge clk); #1;
+    ev_l2_load_miss = 1'b0;
+    @(posedge clk); #1;
+    check("l2_load_miss conto su pulso", l2_load_miss, 1);
+    check("y l2_load_hit no se movio",   l2_load_hit,  3);
+
+    // Dos de acierto de escritura
+    repeat (2) begin
+      ev_l2_store_hit = 1'b1;
+      @(posedge clk); #1;
+      ev_l2_store_hit = 1'b0;
+      @(posedge clk); #1;
+    end
+    check("l2_store_hit conto los dos", l2_store_hit, 2);
+
+    // Cuatro de fallo de escritura
+    repeat (4) begin
+      ev_l2_store_miss = 1'b1;
+      @(posedge clk); #1;
+      ev_l2_store_miss = 1'b0;
+      @(posedge clk); #1;
+    end
+    check("l2_store_miss conto los cuatro", l2_store_miss, 4);
+
+    // Y el stall por eviction buffer lleno, que es el contador 22: a
+    // diferencia de los otros, este cuenta CICLOS, no eventos, asi que se
+    // sostiene cinco ciclos seguidos.
+    ev_stall_evict = 1'b1;
+    repeat (5) begin
+      @(posedge clk); #1;
+    end
+    ev_stall_evict = 1'b0;
+    @(posedge clk); #1;
+    check("stall_por_evict conto los cinco ciclos sostenidos",
+          stall_por_evict, 5);
+
+    // Ninguno de los cuatro de hit/miss se movio con el stall
+    check("y el stall no toco l2_load_hit",   l2_load_hit,   3);
+    check("ni l2_store_miss",                 l2_store_miss, 4);
+
+    // -------------------------------------------------------------------------
+    $display("");
+    $display("[I5] los contadores que exige la seccion 5 del enunciado");
+    // -------------------------------------------------------------------------
+    // 5.2 pide contar las invalidaciones hacia atras ejecutadas sobre L1-D
+    // cuando la politica es inclusiva, y 5.3 pide accesos a memoria principal,
+    // ciclos de transferencia y utilizacion del ancho de banda. Los dos
+    // primeros son contadores; la utilizacion se deriva de ellos en el informe.
+
+    reiniciar();
+
+    // Tres invalidaciones ejecutadas
+    repeat (3) begin
+      ev_inv_ejecutada = 1'b1;
+      @(posedge clk); #1;
+      ev_inv_ejecutada = 1'b0;
+      @(posedge clk); #1;
+    end
+    check("inv_ejecutadas conto las tres", inv_ejecutadas, 3);
+    check("y no toco los accesos a memoria", mem_accesos, 0);
+
+    // Dos accesos a memoria principal
+    repeat (2) begin
+      ev_mem_acceso = 1'b1;
+      @(posedge clk); #1;
+      ev_mem_acceso = 1'b0;
+      @(posedge clk); #1;
+    end
+    check("mem_accesos conto los dos", mem_accesos, 2);
+    check("y las invalidaciones no se movieron", inv_ejecutadas, 3);
+
+    // Diez ciclos de bus ocupado. Es un contador de CICLOS, no de eventos, asi
+    // que se sostiene en alto.
+    ev_mem_ocupado = 1'b1;
+    repeat (10) begin
+      @(posedge clk); #1;
+    end
+    ev_mem_ocupado = 1'b0;
+    @(posedge clk); #1;
+    check("mem_ciclos conto los diez ciclos sostenidos", mem_ciclos, 10);
+
+    // Con los dos se puede derivar la utilizacion del ancho de banda, que es
+    // lo que pide 5.3: ciclos ocupados sobre ciclos totales.
+    check("y hay con que calcular la utilizacion",
+          (mem_accesos > 0 && mem_ciclos > 0), 1'b1);
 
 `ifdef FORCE_FAIL
     check("caso inyectado a proposito", bundles, 32'hDEAD);

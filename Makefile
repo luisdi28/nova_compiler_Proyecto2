@@ -329,6 +329,22 @@ prueba-rtl-test6: $(BIN) $(RTL_TB) $(RTL_SRCS)
 prueba-rtl-equivalencia: $(BIN) $(RTL_TB) $(RTL_SRCS) test/run_equivalencia.sh
 	sh test/run_equivalencia.sh ./$(BIN) "$(CERBERO_CPU)"
 
+# Iteracion 5: la misma bateria, recogiendo los contadores de cada corrida, y
+# despues las tablas. El directorio es un parametro para poder guardar una
+# medicion y compararla con otra.
+#
+# Es especifico de este objetivo: `prueba-rtl-equivalencia` a secas no debe
+# escribir nada, para que la prueba de siempre siga siendo la prueba de siempre.
+METRICAS_DIR ?= medicion
+medir-niveles: export METRICAS_DIR := $(METRICAS_DIR)
+
+medir-niveles: $(BIN) $(RTL_TB) $(RTL_SRCS) test/run_equivalencia.sh
+	sh test/run_equivalencia.sh ./$(BIN) "$(CERBERO_CPU)"
+	python3 tools/tabla_niveles.py "$(METRICAS_DIR)"
+
+tabla-niveles:
+	python3 tools/tabla_niveles.py "$(METRICAS_DIR)"
+
 prueba-ciclos: $(BIN) $(RTL_TB) $(RTL_SRCS) test/optimizaciones/comparar_ciclos.sh
 	sh test/optimizaciones/comparar_ciclos.sh ./$(BIN) "$(CERBERO_CPU)"
 

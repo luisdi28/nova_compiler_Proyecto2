@@ -167,29 +167,55 @@ for caso in \
     OPT="-O2" sh test/run_rtl_test.sh "$NOVAC" "$fuente" "$esperado" "$CPU"
 done
 
-verificar_mejora_ipc() {
+# Que -O2 corra mas rapido que -O1, medido en CICLOS.
+#
+# Antes esta comprobacion exigia que subiera el IPC, y eso es medir lo que no
+# se quiere. El IPC es instrucciones/ciclos: una optimizacion que quita trabajo
+# baja las dos cosas, y el cociente puede moverse para cualquier lado. El
+# desenrollado quita justamente instrucciones de puro gasto -- la actualizacion
+# del contador y el salto de cada vuelta -- asi que las instrucciones pueden
+# caer mas rapido que los ciclos y el IPC bajar mientras el programa se acelera.
+#
+# Paso con 'unroll_variable_pequena.nv' al montar la jerarquia de memoria:
+#
+#       -O1   387 ciclos, 152 instrucciones, IPC 0.393
+#       -O2   300 ciclos, 116 instrucciones, IPC 0.387
+#
+# 22.5% menos ciclos, y la comprobacion del IPC lo daba por fallo. Sin cache el
+# equilibrio caia del otro lado y pasaba, pero por casualidad, no porque la
+# afirmacion fuera correcta.
+#
+# Los ciclos si son la medida: son el tiempo de ejecucion. El IPC se sigue
+# reportando, que para eso sirve -- dice cuanto del ancho VLIW se aprovecha --
+# pero no decide si la prueba pasa.
+verificar_mejora_ciclos() {
     fuente=$1
     esperado=$2
     salida_o1=$(OPT="-O1" sh test/run_rtl_test.sh \
         "$NOVAC" "$fuente" "$esperado" "$CPU")
     salida_o2=$(OPT="-O2" sh test/run_rtl_test.sh \
         "$NOVAC" "$fuente" "$esperado" "$CPU")
+    ciclos_o1=$(printf '%s\n' "$salida_o1" | awk '/ciclos RTL:/ { print $3; exit }')
+    ciclos_o2=$(printf '%s\n' "$salida_o2" | awk '/ciclos RTL:/ { print $3; exit }')
     ipc_o1=$(printf '%s\n' "$salida_o1" | awk '/IPC RTL:/ { print $3; exit }')
     ipc_o2=$(printf '%s\n' "$salida_o2" | awk '/IPC RTL:/ { print $3; exit }')
-    if [ -z "$ipc_o1" ] || [ -z "$ipc_o2" ] ||
-        ! awk -v antes="$ipc_o1" -v despues="$ipc_o2" \
-            'BEGIN { exit !(despues > antes) }'; then
-        echo "Fallo: -O2 no mejora el IPC de $fuente (-O1=$ipc_o1, -O2=$ipc_o2)" >&2
+    if [ -z "$ciclos_o1" ] || [ -z "$ciclos_o2" ] ||
+        [ "$ciclos_o2" -ge "$ciclos_o1" ]; then
+        echo "Fallo: -O2 no reduce los ciclos de $fuente" \
+             "(-O1=$ciclos_o1, -O2=$ciclos_o2)" >&2
         exit 1
     fi
-    printf '  IPC RTL de %s: -O1=%s, -O2=%s\n' \
-        "$(basename "$fuente")" "$ipc_o1" "$ipc_o2"
+    printf '  %s: ciclos -O1=%s -O2=%s (-%s%%), IPC -O1=%s -O2=%s\n' \
+        "$(basename "$fuente")" "$ciclos_o1" "$ciclos_o2" \
+        "$(awk -v a="$ciclos_o1" -v b="$ciclos_o2" \
+             'BEGIN { printf "%.1f", 100*(a-b)/a }')" \
+        "$ipc_o1" "$ipc_o2"
 }
 
-verificar_mejora_ipc "$DIR/reordenamiento_ciclo.nv" 74
-verificar_mejora_ipc "$DIR/unroll_variable_pequena.nv" \
+verificar_mejora_ciclos "$DIR/reordenamiento_ciclo.nv" 74
+verificar_mejora_ciclos "$DIR/unroll_variable_pequena.nv" \
     "$(cat "$DIR/unroll_variable_pequena.esperado")"
-verificar_mejora_ipc "$DIR/unroll_variable_400.nv" \
+verificar_mejora_ciclos "$DIR/unroll_variable_400.nv" \
     "$(tr -d '\r' < "$DIR/unroll_variable_400.esperado")"
 
 OPT="-O2" sh test/run_rtl_test.sh "$NOVAC" \

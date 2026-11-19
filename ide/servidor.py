@@ -134,7 +134,9 @@ def leer_metricas(texto):
         "tiempos_ms": tiempos,
         "contadores": contadores,
         "ciclos_estimados": {
-            "antes": simulacion_ciclos(r"ANTES \(-O0\)"),
+            # No es -O0: es el TAC previo a la fase 6 pasado por el mismo
+            # backend que la corrida actual. Ver el comentario en main.c.
+            "antes": simulacion_ciclos(r"ANTES \(sin fase 6, mismo backend\)"),
             "despues": simulacion_ciclos(r"DESPUES \(-O[012]\)"),
         },
     }

@@ -147,3 +147,19 @@ La [guía de pruebas del IDE](./documentacion/PRUEBAS_IDE.md) describe sus
 paneles; la [guía de demo](./documentacion/GUIA_PRUEBAS_Y_DEMO.md) y la
 [guía de defensa](./documentacion/GUIA_DEFENSA_COMPILADOR.md) contienen más
 ejemplos de uso.
+
+## Rendimiento
+
+Qué gana cada nivel de optimización, medido sobre el RTL:
+[evidencia de optimización](./documentacion/EVIDENCIA_OPTIMIZACION.md).
+
+Qué le hace cada nivel a la jerarquía de memoria y al empaquetado de bundles
+—la Iteración 5 del proyecto de arquitectura—:
+[los niveles contra la jerarquía](./documentacion/ITERACION5_NIVELES.md), con
+las [tablas generadas](./documentacion/TABLAS_ITERACION5.md) y la medición en
+crudo en [`medicion/`](./medicion/README.md).
+
+```bash
+make medir-niveles                        # mide y arma las tablas (~30 min)
+make tabla-niveles METRICAS_DIR=medicion  # rehace las tablas sin simular
+```

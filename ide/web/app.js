@@ -1268,7 +1268,17 @@ function dibujarMetricas(metricas) {
   } else if (rtl) {
     panelRtl.textContent = `Metricas RTL no disponibles: ${rtl.motivo}`;
   }
+  // "Antes" no es -O0. Es el TAC previo a la fase 6 pasado por el MISMO
+  // backend que esta corrida, asi que ya trae la asignacion de registros y la
+  // calendarizacion del nivel elegido. Lo que aisla es el efecto de la fase 6
+  // sola, y por eso subestima lo que gana optimizar frente a -O0. Decirlo en
+  // la cabecera evita que alguien lea esta tabla como "sin optimizar contra
+  // optimizado", que es lo que las palabras sugieren y no lo que miden.
   $("metricas-tabla").innerHTML =
+    `<p class="metricas-ayuda">«Antes» = el codigo intermedio previo a la fase 6, ` +
+    `compilado con el mismo backend y el mismo nivel. No es <code>-O0</code>: ` +
+    `aisla el efecto de la fase 6 sola. Para comparar contra <code>-O0</code> ` +
+    `hay que compilar en cada nivel por separado.</p>` +
     `<table class="tabla-metricas"><thead><tr><th>Metrica</th><th>Antes</th><th>Despues</th></tr></thead><tbody>` +
     filas.map(([nombre, a, d]) =>
       `<tr><th>${escapar(nombre)}</th><td>${escapar(String(a))}</td><td>${escapar(String(d))}</td></tr>`
